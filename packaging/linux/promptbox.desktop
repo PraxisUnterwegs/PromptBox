@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=PromptBox
+Comment=Local-first Markdown prompt manager (Preview)
+Exec=promptbox
+Terminal=false
+Categories=Utility;Office;

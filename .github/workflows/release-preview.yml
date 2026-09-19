@@ -1,0 +1,118 @@
+name: Build Preview
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-preview.*"
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.29.2"
+
+jobs:
+  linux:
+    name: Linux x64 DEB
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+      - name: Resolve dependencies and test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build Linux release
+        run: flutter build linux --release
+      - name: Package Debian preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$RUNNER_TEMP/promptbox-deb"
+          mkdir -p "$package_root/DEBIAN"
+          mkdir -p "$package_root/usr/lib/promptbox"
+          mkdir -p "$package_root/usr/bin"
+          mkdir -p "$package_root/usr/share/applications"
+          cp -a build/linux/x64/release/bundle/. "$package_root/usr/lib/promptbox/"
+          ln -s /usr/lib/promptbox/prompt_box "$package_root/usr/bin/promptbox"
+          install -m 0644 packaging/linux/promptbox.desktop "$package_root/usr/share/applications/promptbox.desktop"
+          install -m 0644 packaging/linux/control "$package_root/DEBIAN/control"
+          mkdir -p dist
+          dpkg-deb --root-owner-group --build "$package_root" dist/promptbox-preview-linux-amd64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptbox-linux-amd64
+          path: dist/promptbox-preview-linux-amd64.deb
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64 Portable
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve dependencies and test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build Windows release
+        run: flutter build windows --release
+      - name: Package Windows portable preview
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive `
+            -Path "build/windows/x64/runner/Release/*" `
+            -DestinationPath "dist/PromptBox-preview-windows-x64.zip" `
+            -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptbox-windows-x64
+          path: dist/PromptBox-preview-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish Preview Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find artifacts -type f -print0)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "PromptBox 0.1 Preview" \
+              --notes-file .github/release-notes-preview.md \
+              --prerelease
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --title "PromptBox 0.1 Preview" \
+              --notes-file .github/release-notes-preview.md \
+              --prerelease \
+              --verify-tag
+          fi

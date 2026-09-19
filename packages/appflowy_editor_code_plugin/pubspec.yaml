@@ -1,0 +1,15 @@
+name: appflowy_editor_plugins
+description: Code-block-only AppFlowy editor plugin used by PromptBox.
+version: 0.0.6+promptbox.1
+publish_to: none
+
+environment:
+  sdk: ">=3.1.5 <4.0.0"
+  flutter: ">=3.13.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  appflowy_editor: ^2.5.1
+  highlight: ^0.7.0
+  provider: ^6.1.2

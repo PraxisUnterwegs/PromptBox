@@ -1,0 +1,10 @@
+Package: promptbox
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: PraxisUnterwegs
+Depends: libgtk-3-0, libblkid1, liblzma5, libstdc++6
+Description: Local-first Markdown prompt manager (Preview)
+ PromptBox stores prompts in a searchable daily timeline with Markdown,
+ tags, outlines, local backups, code blocks, and LaTeX formulas.
