@@ -1,6 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'models.dart';
 import 'storage.dart';
 
@@ -32,9 +30,11 @@ class PromptBoxController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
-      final preferences = await SharedPreferences.getInstance();
+      final storedTheme = await AppPreferences.readString(
+        AppPreferences.themePreferenceKey,
+      );
       themePreference = AppThemePreference.values.firstWhere(
-        (e) => e.name == preferences.getString('theme_preference'),
+        (e) => e.name == storedTheme,
         orElse: () => AppThemePreference.system,
       );
       tags = await _store.readTags();
@@ -185,8 +185,10 @@ class PromptBoxController extends ChangeNotifier {
 
   Future<void> setThemePreference(AppThemePreference value) async {
     themePreference = value;
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('theme_preference', value.name);
+    await AppPreferences.writeString(
+      AppPreferences.themePreferenceKey,
+      value.name,
+    );
     notifyListeners();
   }
 

@@ -132,18 +132,16 @@ class JsonPromptStore implements PromptStore {
 }
 
 class StorageLocation {
-  static const _preferenceKey = 'database_path';
+  static const _preferenceKey = AppPreferences.databasePathKey;
   static Future<String> resolve() async {
-    final preferences = await SharedPreferences.getInstance();
-    final selected = preferences.getString(_preferenceKey);
+    final selected = await AppPreferences.readString(_preferenceKey);
     if (selected != null && selected.isNotEmpty) return selected;
     final support = await getApplicationSupportDirectory();
     return p.join(support.path, 'PromptBox');
   }
 
   static Future<void> remember(String path) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_preferenceKey, p.normalize(path));
+    await AppPreferences.writeString(_preferenceKey, p.normalize(path));
   }
 
   static Future<void> copyDatabase(String source, String destination) async {
@@ -164,6 +162,28 @@ class StorageLocation {
         await File(target).parent.create(recursive: true);
         await entity.copy(target);
       }
+    }
+  }
+}
+
+/// Settings stored in the operating system's per-user application support
+/// directory. This is deliberately independent from the executable/install
+/// directory so replacing a DEB package or a Windows portable bundle keeps the
+/// selected database path and other preferences.
+class AppPreferences {
+  static const databasePathKey = 'database_path';
+  static const themePreferenceKey = 'theme_preference';
+
+  static Future<String?> readString(String key) async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(key);
+  }
+
+  static Future<void> writeString(String key, String value) async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = await preferences.setString(key, value);
+    if (!saved) {
+      throw FileSystemException('Unable to save application setting: $key');
     }
   }
 }

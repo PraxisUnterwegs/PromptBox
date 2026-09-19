@@ -91,6 +91,21 @@ void main() {
     expect(await StorageLocation.resolve(), p.normalize(selected));
   });
 
+  test('settings survive application bundle replacement', () async {
+    final selected = p.join(temp.parent.path, 'persistent_prompt_box');
+    await StorageLocation.remember(selected);
+    await AppPreferences.writeString(AppPreferences.themePreferenceKey, 'dark');
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.reload();
+
+    expect(await StorageLocation.resolve(), p.normalize(selected));
+    expect(
+      await AppPreferences.readString(AppPreferences.themePreferenceKey),
+      'dark',
+    );
+  });
+
   test('拒绝将数据库递归复制到自身子目录', () async {
     expect(
       () =>

@@ -90,6 +90,8 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.promptbox" "\0"
+            // Keep CompanyName and ProductName stable: path_provider uses them
+            // to locate the per-user settings directory across upgrades.
             VALUE "FileDescription", "prompt_box" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "prompt_box" "\0"

@@ -43,9 +43,11 @@ jobs:
           mkdir -p "$package_root/usr/lib/promptbox"
           mkdir -p "$package_root/usr/bin"
           mkdir -p "$package_root/usr/share/applications"
+          mkdir -p "$package_root/usr/share/icons/hicolor/512x512/apps"
           cp -a build/linux/x64/release/bundle/. "$package_root/usr/lib/promptbox/"
           ln -s /usr/lib/promptbox/prompt_box "$package_root/usr/bin/promptbox"
-          install -m 0644 packaging/linux/promptbox.desktop "$package_root/usr/share/applications/promptbox.desktop"
+          install -m 0644 packaging/linux/promptbox.desktop "$package_root/usr/share/applications/com.promptbox.prompt_box.desktop"
+          install -m 0644 packaging/linux/promptbox.png "$package_root/usr/share/icons/hicolor/512x512/apps/promptbox.png"
           install -m 0644 packaging/linux/control "$package_root/DEBIAN/control"
           mkdir -p dist
           dpkg-deb --root-owner-group --build "$package_root" dist/promptbox-preview-linux-amd64.deb
@@ -105,13 +107,13 @@ jobs:
           mapfile -d '' files < <(find artifacts -type f -print0)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" \
-              --title "PromptBox 0.1 Preview" \
+              --title "PromptBox 0.1 Preview 2" \
               --notes-file .github/release-notes-preview.md \
               --prerelease
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-              --title "PromptBox 0.1 Preview" \
+              --title "PromptBox 0.1 Preview 2" \
               --notes-file .github/release-notes-preview.md \
               --prerelease \
               --verify-tag
