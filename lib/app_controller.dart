@@ -16,6 +16,10 @@ class PromptBoxController extends ChangeNotifier {
   List<DateTime> availableDays = [];
   List<TagDefinition> tags = [];
   List<WeekNote> weekNotes = [];
+  List<QuickAccessReference> quickAccessReferences = [];
+  List<PromptEntry> quickAccessEntries = [];
+  final Map<String, DayRecord> _quickAccessDays = {};
+  bool quickAccessSelected = false;
   String query = '';
   String? selectedTagId;
   String? error;
@@ -39,6 +43,8 @@ class PromptBoxController extends ChangeNotifier {
       );
       tags = await _store.readTags();
       weekNotes = await _store.readWeekNotes();
+      quickAccessReferences = await _store.readQuickAccess();
+      await _loadQuickAccess();
       availableDays = await _store.listDays();
       _knownToday = today;
       await selectDate(today, notify: false);
@@ -62,15 +68,29 @@ class PromptBoxController extends ChangeNotifier {
 
   Future<void> selectDate(DateTime date, {bool notify = true}) async {
     selectedDate = dateOnly(date);
+    quickAccessSelected = false;
     currentDay = await _store.readDay(selectedDate!);
     query = '';
     selectedTagId = null;
     if (notify) notifyListeners();
   }
 
+  Future<void> selectQuickAccess() async {
+    quickAccessSelected = true;
+    selectedDate = null;
+    query = '';
+    selectedTagId = null;
+    await _loadQuickAccess();
+    notifyListeners();
+  }
+
   List<PromptEntry> get filteredEntries {
     final lower = query.trim().toLowerCase();
-    return (currentDay?.entries ?? const <PromptEntry>[]).where((entry) {
+    final source =
+        quickAccessSelected
+            ? quickAccessEntries
+            : currentDay?.entries ?? const <PromptEntry>[];
+    return source.where((entry) {
       final tagNames = entry.tagIds
           .map(
             (id) =>
@@ -107,21 +127,38 @@ class PromptBoxController extends ChangeNotifier {
     if (content.trim().isEmpty) return;
     entry.content = content.trimRight();
     entry.updatedAt = _clock();
-    await _persistDay();
+    await _persistEntry(entry);
   }
 
   Future<void> deletePrompt(PromptEntry entry) async {
+    if (quickAccessSelected) {
+      await _deleteQuickEntry(entry);
+      return;
+    }
     currentDay!.entries.remove(entry);
+    if (isInQuickAccess(entry)) {
+      quickAccessReferences.removeWhere((item) => item.entryId == entry.id);
+      await _store.writeQuickAccess(quickAccessReferences);
+      await _loadQuickAccess();
+    }
     await _persistDay();
   }
 
   Future<void> movePrompt(PromptEntry entry, int delta) async {
-    final entries = currentDay!.entries;
+    final entries =
+        quickAccessSelected ? quickAccessEntries : currentDay!.entries;
     final from = entries.indexOf(entry);
     final to = from + delta;
     if (from < 0 || to < 0 || to >= entries.length) return;
     entries.removeAt(from);
     entries.insert(to, entry);
+    if (quickAccessSelected) {
+      final reference = quickAccessReferences.removeAt(from);
+      quickAccessReferences.insert(to, reference);
+      await _store.writeQuickAccess(quickAccessReferences);
+      notifyListeners();
+      return;
+    }
     await _persistDay();
   }
 
@@ -130,7 +167,37 @@ class PromptBoxController extends ChangeNotifier {
         ? entry.tagIds.remove(tagId)
         : entry.tagIds.add(tagId);
     entry.updatedAt = _clock();
-    await _persistDay();
+    await _persistEntry(entry);
+  }
+
+  bool isInQuickAccess(PromptEntry entry) =>
+      quickAccessReferences.any((item) => item.entryId == entry.id);
+
+  DateTime entryDate(PromptEntry entry) {
+    if (!quickAccessSelected) return selectedDate ?? entry.createdAt;
+    return quickAccessReferences
+        .firstWhere((item) => item.entryId == entry.id)
+        .date;
+  }
+
+  Future<void> toggleQuickAccess(PromptEntry entry) async {
+    final index = quickAccessReferences.indexWhere(
+      (item) => item.entryId == entry.id,
+    );
+    if (index >= 0) {
+      quickAccessReferences.removeAt(index);
+    } else {
+      final sourceDate =
+          quickAccessSelected
+              ? entryDate(entry)
+              : selectedDate ?? entry.createdAt;
+      quickAccessReferences.add(
+        QuickAccessReference(entryId: entry.id, date: dateOnly(sourceDate)),
+      );
+    }
+    await _store.writeQuickAccess(quickAccessReferences);
+    await _loadQuickAccess();
+    notifyListeners();
   }
 
   Future<TagDefinition?> createTag(
@@ -220,9 +287,64 @@ class PromptBoxController extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadQuickAccess() async {
+    _quickAccessDays.clear();
+    quickAccessEntries = [];
+    final validReferences = <QuickAccessReference>[];
+    for (final reference in quickAccessReferences) {
+      final key = dateKey(reference.date);
+      final day = _quickAccessDays[key] ?? await _store.readDay(reference.date);
+      _quickAccessDays[key] = day;
+      final index = day.entries.indexWhere(
+        (entry) => entry.id == reference.entryId,
+      );
+      if (index < 0) continue;
+      validReferences.add(reference);
+      quickAccessEntries.add(day.entries[index]);
+    }
+    if (validReferences.length != quickAccessReferences.length) {
+      quickAccessReferences = validReferences;
+      await _store.writeQuickAccess(quickAccessReferences);
+    }
+  }
+
+  Future<void> _persistEntry(PromptEntry entry) async {
+    if (!quickAccessSelected) {
+      await _persistDay();
+      return;
+    }
+    final reference = quickAccessReferences.firstWhere(
+      (item) => item.entryId == entry.id,
+    );
+    final day = _quickAccessDays[dateKey(reference.date)];
+    if (day == null) return;
+    await _store.writeDay(day);
+    await _loadQuickAccess();
+    notifyListeners();
+  }
+
+  Future<void> _deleteQuickEntry(PromptEntry entry) async {
+    final index = quickAccessReferences.indexWhere(
+      (item) => item.entryId == entry.id,
+    );
+    if (index < 0) return;
+    final reference = quickAccessReferences[index];
+    final key = dateKey(reference.date);
+    final day = _quickAccessDays[key] ?? await _store.readDay(reference.date);
+    _quickAccessDays[key] = day;
+    day.entries.removeWhere((item) => item.id == entry.id);
+    await _store.writeDay(day);
+    quickAccessReferences.removeAt(index);
+    await _store.writeQuickAccess(quickAccessReferences);
+    await _loadQuickAccess();
+    availableDays = await _store.listDays();
+    notifyListeners();
+  }
+
   Future<void> _persistDay() async {
     try {
       await _store.writeDay(currentDay!);
+      if (quickAccessReferences.isNotEmpty) await _loadQuickAccess();
       availableDays = await _store.listDays();
       error = null;
     } catch (e) {

@@ -136,4 +136,18 @@ void main() {
     expect((await store.readDay(date)).entries.single.content, '可恢复');
     expect(await file.exists(), isTrue);
   });
+  test('quick access references persist in their own database file', () async {
+    await store.writeQuickAccess([
+      QuickAccessReference(entryId: 'first', date: DateTime(2026, 9, 18)),
+      QuickAccessReference(entryId: 'second', date: DateTime(2026, 9, 19)),
+    ]);
+
+    final loaded = await store.readQuickAccess();
+    expect(loaded.map((item) => item.entryId), ['first', 'second']);
+    expect(loaded.map((item) => dateKey(item.date)), [
+      '2026-09-18',
+      '2026-09-19',
+    ]);
+    expect(await File(p.join(temp.path, 'quick_access.json')).exists(), isTrue);
+  });
 }

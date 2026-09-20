@@ -46,6 +46,23 @@ class PromptEntry {
   );
 }
 
+class QuickAccessReference {
+  const QuickAccessReference({required this.entryId, required this.date});
+
+  final String entryId;
+  final DateTime date;
+
+  String get key => '${dateKey(date)}::$entryId';
+
+  Map<String, Object?> toJson() => {'entryId': entryId, 'date': dateKey(date)};
+
+  factory QuickAccessReference.fromJson(Map<String, Object?> json) =>
+      QuickAccessReference(
+        entryId: json['entryId']! as String,
+        date: DateTime.parse(json['date']! as String),
+      );
+}
+
 class DayRecord {
   DayRecord({required this.date, List<PromptEntry>? entries})
     : entries = entries ?? <PromptEntry>[];

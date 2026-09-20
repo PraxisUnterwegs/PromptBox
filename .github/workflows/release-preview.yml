@@ -107,13 +107,13 @@ jobs:
           mapfile -d '' files < <(find artifacts -type f -print0)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" \
-              --title "PromptBox 0.1 Preview 2" \
+              --title "PromptBox 0.1 Preview 3" \
               --notes-file .github/release-notes-preview.md \
               --prerelease
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-              --title "PromptBox 0.1 Preview 2" \
+              --title "PromptBox 0.1 Preview 3" \
               --notes-file .github/release-notes-preview.md \
               --prerelease \
               --verify-tag

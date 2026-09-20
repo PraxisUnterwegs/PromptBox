@@ -82,4 +82,71 @@ void main() {
     expect(restarted.themePreference, AppThemePreference.dark);
     restarted.dispose();
   });
+  test('quick access persists references and edits the original day', () async {
+    await controller.addPrompt('first reusable prompt');
+    final first = controller.currentDay!.entries.single;
+    await controller.toggleQuickAccess(first);
+
+    now = DateTime(2026, 9, 19, 11);
+    await controller.checkDateRollover();
+    await controller.addPrompt('second reusable prompt');
+    final second = controller.currentDay!.entries.single;
+    await controller.toggleQuickAccess(second);
+
+    await controller.selectQuickAccess();
+    expect(controller.quickAccessEntries.map((entry) => entry.content), [
+      'first reusable prompt',
+      'second reusable prompt',
+    ]);
+
+    await controller.editPrompt(
+      controller.quickAccessEntries.first,
+      'edited reusable prompt',
+    );
+    final original = await JsonPromptStore(
+      temp.path,
+    ).readDay(DateTime(2026, 9, 18));
+    expect(original.entries.single.content, 'edited reusable prompt');
+
+    final restarted = PromptBoxController(
+      store: JsonPromptStore(temp.path),
+      clock: () => now,
+    );
+    await restarted.initialize();
+    await restarted.selectQuickAccess();
+    expect(restarted.quickAccessEntries, hasLength(2));
+    expect(
+      restarted.quickAccessEntries.first.content,
+      'edited reusable prompt',
+    );
+    restarted.dispose();
+  });
+
+  test('quick access supports tag filtering and unpinning', () async {
+    final tag = await controller.createTag(
+      'Reusable',
+      0xff123456,
+      description: 'frequent prompts',
+    );
+    await controller.addPrompt('tagged prompt');
+    final entry = controller.currentDay!.entries.single;
+    await controller.toggleTag(entry, tag!.id);
+    await controller.toggleQuickAccess(entry);
+
+    await controller.selectQuickAccess();
+    controller.setTagFilter(tag.id);
+    expect(controller.filteredEntries.single.content, 'tagged prompt');
+    controller.setQuery('missing');
+    expect(controller.filteredEntries, isEmpty);
+    controller.setQuery('');
+
+    await controller.toggleQuickAccess(controller.quickAccessEntries.single);
+    expect(controller.quickAccessEntries, isEmpty);
+    expect(
+      (await JsonPromptStore(
+        temp.path,
+      ).readDay(DateTime(2026, 9, 18))).entries.single.content,
+      'tagged prompt',
+    );
+  });
 }

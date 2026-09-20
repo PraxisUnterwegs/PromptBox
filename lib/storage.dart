@@ -14,6 +14,8 @@ abstract class PromptStore {
   Future<List<DateTime>> listDays();
   Future<List<TagDefinition>> readTags();
   Future<void> writeTags(List<TagDefinition> tags);
+  Future<List<QuickAccessReference>> readQuickAccess();
+  Future<void> writeQuickAccess(List<QuickAccessReference> references);
   Future<List<WeekNote>> readWeekNotes();
   Future<void> writeWeekNotes(List<WeekNote> notes);
 }
@@ -115,6 +117,25 @@ class JsonPromptStore implements PromptStore {
     p.join(rootPath, 'tags.json'),
     {'schemaVersion': 1, 'tags': tags.map((e) => e.toJson()).toList()},
   );
+
+  @override
+  Future<List<QuickAccessReference>> readQuickAccess() async {
+    final data = await _readObject(p.join(rootPath, 'quick_access.json'));
+    return (data['items'] as List<Object?>? ?? const [])
+        .map(
+          (e) => QuickAccessReference.fromJson(
+            (e! as Map).cast<String, Object?>(),
+          ),
+        )
+        .toList();
+  }
+
+  @override
+  Future<void> writeQuickAccess(List<QuickAccessReference> references) =>
+      _writeObject(p.join(rootPath, 'quick_access.json'), {
+        'schemaVersion': 1,
+        'items': references.map((e) => e.toJson()).toList(),
+      });
 
   @override
   Future<List<WeekNote>> readWeekNotes() async {

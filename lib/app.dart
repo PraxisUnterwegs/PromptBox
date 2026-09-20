@@ -81,6 +81,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   final _search = TextEditingController();
   final _scroll = ScrollController();
   final Map<String, GlobalKey> _bubbleKeys = {};
+  final Set<String> _collapsedIds = {};
   Timer? _rolloverTimer;
 
   PromptBoxController get controller => widget.controller;
@@ -142,6 +143,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   );
 
   bool get _showOutline =>
+      controller.quickAccessSelected ||
       shouldShowConversationOutline(controller.selectedDate, controller.today);
 
   Widget _conversation() => Column(
@@ -168,6 +170,14 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
                       key: _bubbleKeys.putIfAbsent(entry.id, GlobalKey.new),
                       entry: entry,
                       tags: controller.tags,
+                      collapsed: _collapsedIds.contains(entry.id),
+                      onToggleCollapsed:
+                          () => setState(() {
+                            _collapsedIds.contains(entry.id)
+                                ? _collapsedIds.remove(entry.id)
+                                : _collapsedIds.add(entry.id);
+                          }),
+                      inQuickAccess: controller.isInQuickAccess(entry),
                       onEdit: () => _editPrompt(entry),
                       onDelete: () => _deletePrompt(entry),
                       onMoveUp: () => controller.movePrompt(entry, -1),
@@ -179,15 +189,19 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
                             color,
                             description: note,
                           ),
+                      onToggleQuickAccess:
+                          () => controller.toggleQuickAccess(entry),
+                      showDate: controller.quickAccessSelected,
                     );
                   },
                 ),
       ),
-      Composer(
-        controller: _composer,
-        onLongEditor: _openLongEditor,
-        onSend: _send,
-      ),
+      if (!controller.quickAccessSelected)
+        Composer(
+          controller: _composer,
+          onLongEditor: _openLongEditor,
+          onSend: _send,
+        ),
     ],
   );
 
@@ -200,18 +214,26 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _dateTitle(controller.selectedDate ?? controller.today),
+                controller.quickAccessSelected
+                    ? '\u5feb\u901f\u8bbf\u95ee'
+                    : _dateTitle(controller.selectedDate ?? controller.today),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              Text(
-                DateFormat(
-                  'yyyy 年 M 月 d 日 EEEE',
-                  'zh_CN',
-                ).format(controller.selectedDate ?? controller.today),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              if (controller.quickAccessSelected)
+                Text(
+                  '${controller.quickAccessEntries.length} \u6761\u5e38\u7528 Prompt',
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              else
+                Text(
+                  DateFormat(
+                    'yyyy 年 M 月 d 日 EEEE',
+                    'zh_CN',
+                  ).format(controller.selectedDate ?? controller.today),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
             ],
           ),
         ),
@@ -227,20 +249,13 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
           ),
         ),
         const SizedBox(width: 8),
-        PopupMenuButton<String?>(
-          tooltip: '标签筛选',
+        IconButton(
+          tooltip: '\u6807\u7b7e\u7b5b\u9009',
+          onPressed: _chooseTagFilter,
           icon: Badge(
             isLabelVisible: controller.selectedTagId != null,
             child: const Icon(Icons.filter_list),
           ),
-          onSelected: controller.setTagFilter,
-          itemBuilder:
-              (_) => [
-                const PopupMenuItem(value: null, child: Text('全部标签')),
-                ...controller.tags.map(
-                  (tag) => PopupMenuItem(value: tag.id, child: Text(tag.name)),
-                ),
-              ],
         ),
         IconButton(
           tooltip: '管理标签',
@@ -262,12 +277,18 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
         ),
         const SizedBox(height: 12),
         Text(
-          controller.query.isEmpty ? '把想到的 Prompt 写在这里' : '没有匹配结果',
+          controller.query.isNotEmpty || controller.selectedTagId != null
+              ? '\u6ca1\u6709\u5339\u914d\u7ed3\u679c'
+              : controller.quickAccessSelected
+              ? '\u8fd8\u6ca1\u6709\u5feb\u901f\u8bbf\u95ee\u5185\u5bb9'
+              : '\u628a\u60f3\u5230\u7684 Prompt \u5199\u5728\u8fd9\u91cc',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 6),
         Text(
-          '支持 Markdown、标签与即时保存',
+          controller.quickAccessSelected
+              ? '\u5728\u6c14\u6ce1\u4e0a\u70b9\u51fb\u661f\u6807\u5373\u53ef\u6536\u85cf'
+              : '\u652f\u6301 Markdown\u3001\u6807\u7b7e\u4e0e\u5373\u65f6\u4fdd\u5b58',
           style: TextStyle(color: Theme.of(context).colorScheme.outline),
         ),
       ],
@@ -288,9 +309,9 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
       ),
       Expanded(
         child: ListView.builder(
-          itemCount: controller.currentDay?.entries.length ?? 0,
+          itemCount: controller.filteredEntries.length,
           itemBuilder: (_, index) {
-            final entry = controller.currentDay!.entries[index];
+            final entry = controller.filteredEntries[index];
             return ListTile(
               dense: true,
               leading: Text(
@@ -359,8 +380,16 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
       context: context,
       builder:
           (_) => AlertDialog(
-            title: const Text('删除这条 Prompt？'),
-            content: const Text('此操作无法撤销。'),
+            title: Text(
+              controller.quickAccessSelected
+                  ? '\u6c38\u4e45\u5220\u9664\u8fd9\u6761 Prompt\uff1f'
+                  : '\u5220\u9664\u8fd9\u6761 Prompt\uff1f',
+            ),
+            content: Text(
+              controller.quickAccessSelected
+                  ? '\u5c06\u540c\u65f6\u4ece\u539f\u65e5\u671f\u548c\u5feb\u901f\u8bbf\u95ee\u4e2d\u5220\u9664\uff0c\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002'
+                  : '\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -374,6 +403,19 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
           ),
     );
     if (confirmed == true) await controller.deletePrompt(entry);
+  }
+
+  Future<void> _chooseTagFilter() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder:
+          (_) => TagFilterDialog(
+            tags: controller.tags,
+            selectedId: controller.selectedTagId,
+          ),
+    );
+    if (result == null) return;
+    controller.setTagFilter(result == TagFilterDialog.allTags ? null : result);
   }
 
   Future<void> _manageTags() async => showDialog<void>(
@@ -452,6 +494,23 @@ class _NavigationRail extends StatelessWidget {
               _ => Icons.history_toggle_off,
             },
           ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: ListTile(
+            selected: controller.quickAccessSelected,
+            selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            leading: Badge(
+              isLabelVisible: controller.quickAccessEntries.isNotEmpty,
+              label: Text('${controller.quickAccessEntries.length}'),
+              child: const Icon(Icons.star_outline),
+            ),
+            title: const Text('\u5feb\u901f\u8bbf\u95ee'),
+            onTap: controller.selectQuickAccess,
+          ),
+        ),
         const Divider(indent: 14, endIndent: 14),
         ListTile(
           leading: const Icon(Icons.archive_outlined),
@@ -482,6 +541,7 @@ class _NavigationRail extends StatelessWidget {
     IconData icon,
   ) {
     final selected =
+        !controller.quickAccessSelected &&
         controller.selectedDate != null &&
         dateKey(controller.selectedDate!) == dateKey(date);
     return Padding(
@@ -505,6 +565,11 @@ class PromptBubble extends StatelessWidget {
     required this.entry,
     required this.tags,
     required this.onEdit,
+    this.collapsed = false,
+    this.onToggleCollapsed,
+    this.inQuickAccess = false,
+    this.onToggleQuickAccess,
+    this.showDate = false,
     required this.onDelete,
     required this.onMoveUp,
     required this.onMoveDown,
@@ -513,6 +578,11 @@ class PromptBubble extends StatelessWidget {
   });
   final PromptEntry entry;
   final List<TagDefinition> tags;
+  final bool collapsed;
+  final VoidCallback? onToggleCollapsed;
+  final bool inQuickAccess;
+  final VoidCallback? onToggleQuickAccess;
+  final bool showDate;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onMoveUp;
@@ -537,8 +607,23 @@ class PromptBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ExtendedMarkdownBody(data: entry.content, selectable: true),
-              if (entry.tagIds.isNotEmpty) ...[
+              if (collapsed)
+                Row(
+                  children: [
+                    const Icon(Icons.notes, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        entry.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                ExtendedMarkdownBody(data: entry.content, selectable: true),
+              if (!collapsed && entry.tagIds.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 6,
@@ -566,12 +651,35 @@ class PromptBubble extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    DateFormat('HH:mm').format(entry.createdAt),
+                    DateFormat(
+                      showDate ? 'M/d HH:mm' : 'HH:mm',
+                    ).format(entry.createdAt),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Theme.of(context).colorScheme.outline,
                     ),
                   ),
                   const Spacer(),
+                  IconButton(
+                    tooltip: collapsed ? '\u5c55\u5f00' : '\u6298\u53e0',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onToggleCollapsed,
+                    icon: Icon(
+                      collapsed ? Icons.expand_more : Icons.expand_less,
+                      size: 19,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip:
+                        inQuickAccess
+                            ? '\u79fb\u51fa\u5feb\u901f\u8bbf\u95ee'
+                            : '\u52a0\u5165\u5feb\u901f\u8bbf\u95ee',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onToggleQuickAccess,
+                    icon: Icon(
+                      inQuickAccess ? Icons.star : Icons.star_border,
+                      size: 19,
+                    ),
+                  ),
                   IconButton(
                     tooltip: '复制 Markdown',
                     visualDensity: VisualDensity.compact,
@@ -812,6 +920,118 @@ class _LongEditorDialogState extends State<LongEditorDialog> {
       ),
     ),
   );
+}
+
+class TagFilterDialog extends StatefulWidget {
+  const TagFilterDialog({
+    super.key,
+    required this.tags,
+    required this.selectedId,
+  });
+
+  static const allTags = '__all_tags__';
+  final List<TagDefinition> tags;
+  final String? selectedId;
+
+  @override
+  State<TagFilterDialog> createState() => _TagFilterDialogState();
+}
+
+class _TagFilterDialogState extends State<TagFilterDialog> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final filtered =
+        widget.tags.where((tag) {
+          return query.isEmpty ||
+              tag.name.toLowerCase().contains(query) ||
+              tag.description.toLowerCase().contains(query);
+        }).toList();
+
+    return AlertDialog(
+      title: const Text('\u6807\u7b7e\u7b5b\u9009'),
+      content: SizedBox(
+        width: 420,
+        height: 430,
+        child: Column(
+          children: [
+            TextField(
+              controller: _search,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText:
+                    '\u641c\u7d22\u6807\u7b7e\u540d\u79f0\u6216\u5907\u6ce8',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.label_off_outlined),
+                    title: const Text('\u5168\u90e8\u6807\u7b7e'),
+                    trailing:
+                        widget.selectedId == null
+                            ? const Icon(Icons.check)
+                            : null,
+                    onTap:
+                        () => Navigator.pop(context, TagFilterDialog.allTags),
+                  ),
+                  if (filtered.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(18),
+                      child: Center(
+                        child: Text(
+                          '\u6ca1\u6709\u5339\u914d\u7684\u6807\u7b7e',
+                        ),
+                      ),
+                    ),
+                  ...filtered.map(
+                    (tag) => ListTile(
+                      leading: CircleAvatar(
+                        radius: 8,
+                        backgroundColor: tag.color,
+                      ),
+                      title: Text(tag.name),
+                      subtitle:
+                          tag.description.isEmpty
+                              ? null
+                              : Text(
+                                tag.description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                      trailing:
+                          widget.selectedId == tag.id
+                              ? const Icon(Icons.check)
+                              : null,
+                      onTap: () => Navigator.pop(context, tag.id),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('\u53d6\u6d88'),
+        ),
+      ],
+    );
+  }
 }
 
 class TagPickerDialog extends StatefulWidget {

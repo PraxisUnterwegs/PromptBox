@@ -222,4 +222,104 @@ void main() {
     expect(copied, markdown);
     expect(find.text('已复制完整 Markdown'), findsOneWidget);
   });
+  testWidgets('collapsed bubble shows a compact title and can expand', (
+    tester,
+  ) async {
+    var toggled = false;
+    final now = DateTime(2026, 9, 20, 8);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PromptBubble(
+            entry: PromptEntry(
+              id: 'collapse-test',
+              content: '# Long prompt title\n\nSecond paragraph',
+              createdAt: now,
+              updatedAt: now,
+            ),
+            tags: const [],
+            collapsed: true,
+            onToggleCollapsed: () => toggled = true,
+            onEdit: () {},
+            onDelete: () {},
+            onMoveUp: () {},
+            onMoveDown: () {},
+            onToggleTag: (_) {},
+            onCreateTag: (_, __, ___) async => null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Long prompt title'), findsOneWidget);
+    expect(find.byType(ExtendedMarkdownBody), findsNothing);
+    await tester.tap(find.byTooltip('\u5c55\u5f00'));
+    expect(toggled, isTrue);
+  });
+
+  testWidgets('bubble exposes quick access pin state', (tester) async {
+    var toggled = false;
+    final now = DateTime(2026, 9, 20, 8);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PromptBubble(
+            entry: PromptEntry(
+              id: 'pin-test',
+              content: 'Reusable prompt',
+              createdAt: now,
+              updatedAt: now,
+            ),
+            tags: const [],
+            inQuickAccess: true,
+            onToggleQuickAccess: () => toggled = true,
+            onEdit: () {},
+            onDelete: () {},
+            onMoveUp: () {},
+            onMoveDown: () {},
+            onToggleTag: (_) {},
+            onCreateTag: (_, __, ___) async => null,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('\u79fb\u51fa\u5feb\u901f\u8bbf\u95ee'));
+    expect(toggled, isTrue);
+  });
+
+  testWidgets('tag filter dialog searches names and descriptions', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: TagFilterDialog(
+            selectedId: null,
+            tags: [
+              TagDefinition(
+                id: 'backend',
+                name: 'Backend',
+                colorValue: 0xff123456,
+                description: 'server work',
+              ),
+              TagDefinition(
+                id: 'frontend',
+                name: 'Frontend',
+                colorValue: 0xff654321,
+                description: 'visual interface',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Backend'), findsOneWidget);
+    expect(find.text('Frontend'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'visual');
+    await tester.pump();
+    expect(find.text('Backend'), findsNothing);
+    expect(find.text('Frontend'), findsOneWidget);
+  });
 }
