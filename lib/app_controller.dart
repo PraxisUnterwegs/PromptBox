@@ -100,6 +100,7 @@ class PromptBoxController extends ChangeNotifier {
       final matchesText =
           lower.isEmpty ||
           entry.content.toLowerCase().contains(lower) ||
+          (entry.outlineName?.toLowerCase().contains(lower) ?? false) ||
           tagNames.toLowerCase().contains(lower);
       return matchesText &&
           (selectedTagId == null || entry.tagIds.contains(selectedTagId));
@@ -127,6 +128,16 @@ class PromptBoxController extends ChangeNotifier {
     if (content.trim().isEmpty) return;
     entry.content = content.trimRight();
     entry.updatedAt = _clock();
+    await _persistEntry(entry);
+  }
+
+  Future<void> setOutlineName(PromptEntry entry, String name) async {
+    final trimmed = name.trim();
+    final nextName = trimmed.isEmpty ? null : trimmed;
+    if (entry.outlineName == nextName) return;
+    entry.outlineName = nextName;
+    entry.updatedAt = _clock();
+    notifyListeners();
     await _persistEntry(entry);
   }
 

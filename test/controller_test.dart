@@ -149,4 +149,35 @@ void main() {
       'tagged prompt',
     );
   });
+
+  test('大纲名称可选、可搜索，并与原日期及快速访问同步', () async {
+    await controller.addPrompt('# 自动标题\n正文');
+    final entry = controller.currentDay!.entries.single;
+    expect(entry.outlineTitle, '自动标题');
+
+    await controller.setOutlineName(entry, '  重要流程  ');
+    expect(entry.outlineTitle, '重要流程');
+    controller.setQuery('重要流程');
+    expect(controller.filteredEntries, [entry]);
+    controller.setQuery('');
+
+    await controller.toggleQuickAccess(entry);
+    await controller.selectQuickAccess();
+    expect(controller.quickAccessEntries.single.outlineTitle, '重要流程');
+    expect(
+      (await JsonPromptStore(
+        temp.path,
+      ).readDay(now)).entries.single.outlineName,
+      '重要流程',
+    );
+
+    await controller.setOutlineName(controller.quickAccessEntries.single, '  ');
+    expect(controller.quickAccessEntries.single.outlineTitle, '自动标题');
+    expect(
+      (await JsonPromptStore(
+        temp.path,
+      ).readDay(now)).entries.single.outlineName,
+      isNull,
+    );
+  });
 }

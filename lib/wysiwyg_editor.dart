@@ -95,11 +95,13 @@ class WysiwygMarkdownEditor extends StatelessWidget {
     required this.controller,
     this.autoFocus = false,
     this.showToolbar = true,
+    this.onSubmit,
   });
 
   final WysiwygMarkdownController controller;
   final bool autoFocus;
   final bool showToolbar;
+  final VoidCallback? onSubmit;
 
   @override
   Widget build(BuildContext context) {
@@ -149,6 +151,16 @@ class WysiwygMarkdownEditor extends StatelessWidget {
                     ...standardCharacterShortcutEvents,
                   ],
                   commandShortcutEvents: [
+                    if (onSubmit != null)
+                      CommandShortcutEvent(
+                        key: 'send prompt',
+                        getDescription: () => '发送 Prompt',
+                        command: 'ctrl+enter',
+                        handler: (_) {
+                          onSubmit!();
+                          return KeyEventResult.handled;
+                        },
+                      ),
                     ...codeBlockCommands(),
                     ...standardCommandShortcutEvents,
                   ],

@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import 'app_controller.dart';
 import 'markdown_extensions.dart';
@@ -79,9 +80,9 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     with WidgetsBindingObserver {
   final _composer = WysiwygMarkdownController();
   final _search = TextEditingController();
-  final _scroll = ScrollController();
-  final Map<String, GlobalKey> _bubbleKeys = {};
+  final _itemScroll = ItemScrollController();
   final Set<String> _collapsedIds = {};
+  bool _sending = false;
   Timer? _rolloverTimer;
 
   PromptBoxController get controller => widget.controller;
@@ -102,7 +103,6 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     _rolloverTimer?.cancel();
     _composer.dispose();
     _search.dispose();
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -159,15 +159,15 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
         child:
             controller.filteredEntries.isEmpty
                 ? _emptyState()
-                : ListView.separated(
-                  controller: _scroll,
+                : ScrollablePositionedList.separated(
+                  itemScrollController: _itemScroll,
                   padding: const EdgeInsets.fromLTRB(28, 24, 28, 18),
                   itemCount: controller.filteredEntries.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final entry = controller.filteredEntries[index];
                     return PromptBubble(
-                      key: _bubbleKeys.putIfAbsent(entry.id, GlobalKey.new),
+                      key: ValueKey('prompt-bubble-${entry.id}'),
                       entry: entry,
                       tags: controller.tags,
                       collapsed: _collapsedIds.contains(entry.id),
@@ -319,20 +319,24 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
                 style: Theme.of(context).textTheme.labelSmall,
               ),
               title: Text(
-                entry.title,
+                entry.outlineTitle,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+              trailing: IconButton(
+                tooltip: '编辑大纲名称',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.drive_file_rename_outline, size: 18),
+                onPressed: () => _editOutlineName(entry),
+              ),
               onTap: () {
-                final bubbleContext = _bubbleKeys[entry.id]?.currentContext;
-                if (bubbleContext != null) {
-                  Scrollable.ensureVisible(
-                    bubbleContext,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                    alignment: .1,
-                  );
-                }
+                if (!_itemScroll.isAttached) return;
+                _itemScroll.scrollTo(
+                  index: index,
+                  duration: const Duration(milliseconds: 350),
+                  curve: Curves.easeOut,
+                  alignment: .08,
+                );
               },
             );
           },
@@ -342,16 +346,29 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   );
 
   Future<void> _send() async {
+    if (_sending) return;
     final value = _composer.markdown;
     if (value.trim().isEmpty) return;
-    await controller.addPrompt(value);
-    _composer.clear();
-    if (_scroll.hasClients) {
-      await _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+    _sending = true;
+    try {
+      await controller.addPrompt(value);
+      _composer.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            controller.quickAccessSelected ||
+            controller.query.isNotEmpty ||
+            controller.selectedTagId != null ||
+            !_itemScroll.isAttached) {
+          return;
+        }
+        _itemScroll.scrollTo(
+          index: controller.filteredEntries.length - 1,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      });
+    } finally {
+      _sending = false;
     }
   }
 
@@ -373,6 +390,49 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     if (value != null && value.trim().isNotEmpty) {
       await controller.editPrompt(entry, value);
     }
+  }
+
+  Future<void> _editOutlineName(PromptEntry entry) async {
+    var name = entry.outlineName ?? '';
+    final result = await showDialog<String>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('编辑大纲名称'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('默认名称：${entry.title}'),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    initialValue: name,
+                    onChanged: (value) => name = value,
+                    autofocus: true,
+                    maxLength: 80,
+                    decoration: const InputDecoration(
+                      labelText: '自定义名称',
+                      helperText: '留空并保存，即可恢复默认名称',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, name),
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+    );
+    if (result != null) await controller.setOutlineName(entry, result);
   }
 
   Future<void> _deletePrompt(PromptEntry entry) async {
@@ -794,19 +854,34 @@ class _ComposerState extends State<Composer> {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
-          child: Container(
-            height: 126,
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outlineVariant,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 126,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: WysiwygMarkdownEditor(
+                  controller: widget.controller,
+                  autoFocus: false,
+                  onSubmit: widget.onSend,
+                ),
               ),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: WysiwygMarkdownEditor(
-              controller: widget.controller,
-              autoFocus: false,
-            ),
+              Padding(
+                padding: const EdgeInsets.only(left: 6, top: 4),
+                child: Text(
+                  'Ctrl+Enter 发送 · Enter 换行',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(width: 10),

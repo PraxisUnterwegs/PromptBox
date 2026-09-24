@@ -13,12 +13,14 @@ class PromptEntry {
     required this.createdAt,
     required this.updatedAt,
     List<String>? tagIds,
+    this.outlineName,
   }) : tagIds = tagIds ?? <String>[];
   final String id;
   String content;
   final DateTime createdAt;
   DateTime updatedAt;
   final List<String> tagIds;
+  String? outlineName;
 
   String get title {
     final lines = content
@@ -30,12 +32,17 @@ class PromptEntry {
     return cleaned.length > 48 ? '${cleaned.substring(0, 48)}…' : cleaned;
   }
 
+  String get outlineTitle =>
+      outlineName?.trim().isNotEmpty == true ? outlineName!.trim() : title;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'content': content,
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
     'tagIds': tagIds,
+    if (outlineName?.trim().isNotEmpty == true)
+      'outlineName': outlineName!.trim(),
   };
   factory PromptEntry.fromJson(Map<String, Object?> json) => PromptEntry(
     id: json['id']! as String,
@@ -43,6 +50,7 @@ class PromptEntry {
     createdAt: DateTime.parse(json['createdAt']! as String),
     updatedAt: DateTime.parse(json['updatedAt']! as String),
     tagIds: (json['tagIds'] as List<Object?>? ?? const []).cast<String>(),
+    outlineName: (json['outlineName'] as String?)?.trim(),
   );
 }
 

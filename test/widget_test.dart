@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -6,9 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:prompt_box/app.dart';
+import 'package:prompt_box/app_controller.dart';
 import 'package:prompt_box/markdown_extensions.dart';
 import 'package:prompt_box/models.dart';
+import 'package:prompt_box/storage.dart';
 import 'package:prompt_box/wysiwyg_editor.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('今天和历史会话显示大纲，未来日期不显示', () {
@@ -56,6 +61,118 @@ void main() {
     expect(find.byType(WysiwygMarkdownEditor), findsOneWidget);
     await tester.tap(find.byTooltip('发送'));
     expect(sent, isTrue);
+  });
+
+  testWidgets('输入框 Enter 换行，Ctrl+Enter 发送', (tester) async {
+    final text = WysiwygMarkdownController();
+    var sent = 0;
+    addTearDown(text.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: const [
+          AppFlowyEditorLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('zh', 'CN'), Locale('en')],
+        home: Scaffold(
+          body: SizedBox(
+            height: 180,
+            child: WysiwygMarkdownEditor(
+              controller: text,
+              onSubmit: () => sent++,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(AppFlowyEditor));
+    await tester.pump();
+    tester.testTextInput.enterText('第一行');
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(sent, 0);
+    tester.testTextInput.enterText('第一行\n第二行');
+    await tester.pump();
+    expect(text.markdown, contains('\n'));
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(sent, 1);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('大纲可跳转到尚未构建的远处气泡', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.binding.setSurfaceSize(const Size(1300, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final temp =
+        (await tester.runAsync(
+          () => Directory.systemTemp.createTemp('prompt_box_outline_'),
+        ))!;
+    addTearDown(() => temp.delete(recursive: true));
+    final date = DateTime(2026, 9, 24);
+    final store = JsonPromptStore(temp.path);
+    final day = DayRecord(
+      date: date,
+      entries: [
+        for (var index = 0; index < 35; index++)
+          PromptEntry(
+            id: 'entry-$index',
+            content: '# Prompt $index\n正文 $index',
+            createdAt: date.add(Duration(minutes: index)),
+            updatedAt: date,
+          ),
+      ],
+    );
+    final controller = PromptBoxController(store: store, clock: () => date);
+    addTearDown(controller.dispose);
+    await tester.runAsync(() async {
+      await store.writeDay(day);
+      await controller.initialize();
+    });
+    await tester.pumpWidget(PromptBoxApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    const bubbleKey = ValueKey('prompt-bubble-entry-25');
+    expect(find.byKey(bubbleKey), findsNothing);
+    final outlineList = find.byType(ListView).last;
+    for (
+      var attempt = 0;
+      attempt < 6 &&
+          find.widgetWithText(ListTile, 'Prompt 25').evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.drag(outlineList, const Offset(0, -600));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.widgetWithText(ListTile, 'Prompt 25'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(bubbleKey), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(ListTile, 'Prompt 25'),
+        matching: find.byTooltip('编辑大纲名称'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('默认名称：Prompt 25'), findsOneWidget);
+    final nameField = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(nameField, '关键大纲');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, '关键大纲'), findsOneWidget);
+    expect(controller.currentDay!.entries[25].content, '# Prompt 25\n正文 25');
   });
 
   testWidgets('空白所见即所得输入框可获得焦点并输入文字', (tester) async {

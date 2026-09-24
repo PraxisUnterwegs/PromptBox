@@ -1,6 +1,6 @@
-# PromptBox 0.1 Preview 3
+# PromptBox 0.1 Preview 4
 
-这是 PromptBox 的第三个公开预览版本，主要用于功能体验、兼容性验证和收集反馈，尚不是正式稳定版。
+这是 PromptBox 的第四个公开预览版本，主要用于功能体验、兼容性验证和收集反馈，尚不是正式稳定版。
 
 主要功能：
 
@@ -33,3 +33,10 @@
 - Quick Access edits stay synchronized with the original dated Prompt instead of creating duplicate content.
 - Added searchable tag filtering by tag name or note.
 - Added regression coverage for Quick Access persistence, original-content synchronization, collapsing, and tag search.
+
+## Preview 4 update
+
+- Fixed outline jumps to distant Prompt bubbles, including items outside the visible list.
+- Added Ctrl+Enter to send from the main editor; Enter still inserts a new line.
+- Added optional custom outline names. Clear a name to restore the automatically generated title.
+- Custom outline names persist with the original Prompt and are available in Quick Access and search.
