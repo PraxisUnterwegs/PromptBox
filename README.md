@@ -52,6 +52,12 @@ promptbox
 
 当前 `.deb` 面向 Debian/Ubuntu 的 x86_64/amd64 桌面环境，尚未提供 ARM Linux 构建。
 
+### macOS Apple Silicon
+
+下载 `PromptBox-preview-macos-arm64.dmg`，打开后将 `PromptBox.app` 拖入“应用程序”。适用于苹果 M 系列芯片。
+
+此预览版采用临时签名，尚未经过 Apple 公证；若首次启动被拦截，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。
+
 ## 基本使用
 
 1. 在底部编辑器中输入内容，使用工具栏应用 Markdown 格式；点击发送或按 Ctrl+Enter 发送，直接按 Enter 换行。
@@ -119,7 +125,7 @@ flutter build windows --release
 flutter build linux --release
 ```
 
-仓库中的 GitHub Actions 会在推送 `v*-preview.*` 标签时，分别使用 Windows 和 Ubuntu runner 构建并创建预发布 Release。本次暂不构建 macOS arm64。
+仓库中的 GitHub Actions 会在推送 `v*-preview.*` 标签时，分别使用 Windows 和 Ubuntu runner 构建并创建预发布 Release。另有专用 macOS arm64 工作流，从 Preview 4 的固定源码构建 DMG，并将其追加到同一个 Release。
 
 ## Preview 限制
 

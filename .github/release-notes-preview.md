@@ -16,6 +16,7 @@
 
 - `promptbox-preview-linux-amd64.deb`：Debian/Ubuntu x64 安装包
 - `PromptBox-preview-windows-x64.zip`：Windows x64 便携版，解压后运行 `prompt_box.exe`
+- `PromptBox-preview-macos-arm64.dmg`：macOS Apple Silicon（M 系列）版本，打开 DMG 后将 `PromptBox.app` 拖入“应用程序”。
 
 注意：Preview 构建尚未签名，也未完成大规模系统兼容性测试。请保留重要数据的独立备份，并通过 Issues 反馈问题。
 
@@ -40,3 +41,7 @@
 - Added Ctrl+Enter to send from the main editor; Enter still inserts a new line.
 - Added optional custom outline names. Clear a name to restore the automatically generated title.
 - Custom outline names persist with the original Prompt and are available in Quick Access and search.
+
+## macOS Apple Silicon build
+
+macOS 版本由 Preview 4 的同一份源码构建，适用于苹果 M 系列芯片。本预览版采用临时签名，尚未经过 Apple 公证；如果系统拦截首次启动，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。

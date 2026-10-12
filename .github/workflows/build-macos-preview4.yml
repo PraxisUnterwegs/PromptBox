@@ -1,0 +1,97 @@
+name: Add macOS ARM64 to Preview 4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-macos-preview4.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-preview4
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: "3.29.2"
+  RELEASE_TAG: v0.1.0-preview.4
+
+jobs:
+  macos:
+    name: macOS Apple Silicon DMG
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the exact existing Preview 4 source, not a newer main commit.
+          ref: 8521091f63207294050504268dfd1ad45d6466ca
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          architecture: arm64
+          cache: true
+      - name: Resolve dependencies and test
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build macOS ARM64 release
+        env:
+          FLUTTER_XCODE_ARCHS: arm64
+          FLUTTER_XCODE_ONLY_ACTIVE_ARCH: "YES"
+          FLUTTER_XCODE_CODE_SIGN_IDENTITY: "-"
+        run: flutter build macos --release
+      - name: Verify and package DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="build/macos/Build/Products/Release/prompt_box.app"
+          test -d "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/prompt_box")" = arm64
+          test "$(lipo -archs "$app/Contents/Frameworks/App.framework/App")" = arm64
+          lipo -verify_arch arm64 "$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.1.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = 4
+          package_root="$RUNNER_TEMP/promptbox-macos-dmg"
+          mkdir -p "$package_root" dist
+          ditto "$app" "$package_root/PromptBox.app"
+          ln -s /Applications "$package_root/Applications"
+          hdiutil create -volname "PromptBox Preview 4" \
+            -srcfolder "$package_root" -format UDZO \
+            dist/PromptBox-preview-macos-arm64.dmg
+          hdiutil verify dist/PromptBox-preview-macos-arm64.dmg
+          shasum -a 256 dist/PromptBox-preview-macos-arm64.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptbox-macos-arm64
+          path: dist/PromptBox-preview-macos-arm64.dmg
+          if-no-files-found: error
+
+  publish:
+    name: Attach macOS to existing Preview 4
+    needs: macos
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: promptbox-macos-arm64
+          path: dist
+      - name: Upload to existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/PromptBox-preview-macos-arm64.dmg --clobber
+          gh release edit "$RELEASE_TAG" --notes-file .github/release-notes-preview.md
