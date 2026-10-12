@@ -57,7 +57,7 @@ jobs:
           echo "::notice title=macOS architecture::App: $(lipo -archs "$app/Contents/MacOS/prompt_box"); Dart: $(lipo -archs "$app/Contents/Frameworks/App.framework/App")"
           test "$(lipo -archs "$app/Contents/MacOS/prompt_box")" = arm64
           test "$(lipo -archs "$app/Contents/Frameworks/App.framework/App")" = arm64
-          lipo -verify_arch arm64 "$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
+          lipo "$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS" -verify_arch arm64
           codesign --verify --deep --strict --verbose=2 "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.1.0
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = 4
