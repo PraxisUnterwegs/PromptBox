@@ -51,8 +51,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          trap 'echo "::error title=macOS packaging::Failed at line $LINENO: $BASH_COMMAND"' ERR
           app="build/macos/Build/Products/Release/prompt_box.app"
           test -d "$app"
+          echo "::notice title=macOS architecture::App: $(lipo -archs "$app/Contents/MacOS/prompt_box"); Dart: $(lipo -archs "$app/Contents/Frameworks/App.framework/App")"
           test "$(lipo -archs "$app/Contents/MacOS/prompt_box")" = arm64
           test "$(lipo -archs "$app/Contents/Frameworks/App.framework/App")" = arm64
           lipo -verify_arch arm64 "$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
