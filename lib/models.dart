@@ -14,6 +14,7 @@ class PromptEntry {
     required this.updatedAt,
     List<String>? tagIds,
     this.outlineName,
+    this.completed = false,
   }) : tagIds = tagIds ?? <String>[];
   final String id;
   String content;
@@ -21,6 +22,7 @@ class PromptEntry {
   DateTime updatedAt;
   final List<String> tagIds;
   String? outlineName;
+  bool completed;
 
   String get title {
     final lines = content
@@ -41,6 +43,7 @@ class PromptEntry {
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
     'tagIds': tagIds,
+    'completed': completed,
     if (outlineName?.trim().isNotEmpty == true)
       'outlineName': outlineName!.trim(),
   };
@@ -51,6 +54,7 @@ class PromptEntry {
     updatedAt: DateTime.parse(json['updatedAt']! as String),
     tagIds: (json['tagIds'] as List<Object?>? ?? const []).cast<String>(),
     outlineName: (json['outlineName'] as String?)?.trim(),
+    completed: json['completed'] as bool? ?? false,
   );
 }
 

@@ -20,6 +20,7 @@ class PromptBoxController extends ChangeNotifier {
   List<PromptEntry> quickAccessEntries = [];
   final Map<String, DayRecord> _quickAccessDays = {};
   bool quickAccessSelected = false;
+  bool tomorrowPlanSelected = false;
   String query = '';
   String? selectedTagId;
   String? error;
@@ -29,6 +30,15 @@ class PromptBoxController extends ChangeNotifier {
 
   String get databasePath => _store.rootPath;
   DateTime get today => dateOnly(_clock());
+  DateTime get tomorrow {
+    final date = today;
+    return DateTime(date.year, date.month, date.day + 1);
+  }
+
+  Duration get timeUntilNextDay {
+    final now = _clock();
+    return DateTime(now.year, now.month, now.day + 1).difference(now);
+  }
 
   Future<void> initialize() async {
     loading = true;
@@ -58,29 +68,46 @@ class PromptBoxController extends ChangeNotifier {
   }
 
   Future<void> checkDateRollover() async {
-    if (_knownToday != null && dateKey(_knownToday!) == dateKey(today)) {
+    final date = today;
+    if (_knownToday != null && dateKey(_knownToday!) == dateKey(date)) {
       return;
     }
-    _knownToday = today;
-    availableDays = await _store.listDays();
-    await selectDate(today);
+    try {
+      await selectDate(date, notify: false);
+      availableDays = await _store.listDays();
+      _knownToday = date;
+      error = null;
+    } catch (e) {
+      error = '日期切换失败，将自动重试：$e';
+    }
+    notifyListeners();
   }
 
   Future<void> selectDate(DateTime date, {bool notify = true}) async {
-    selectedDate = dateOnly(date);
+    final target = dateOnly(date);
+    final day = await _store.readDay(target);
+    selectedDate = target;
     quickAccessSelected = false;
-    currentDay = await _store.readDay(selectedDate!);
+    tomorrowPlanSelected = false;
+    currentDay = day;
     query = '';
     selectedTagId = null;
     if (notify) notifyListeners();
   }
 
   Future<void> selectQuickAccess() async {
+    tomorrowPlanSelected = false;
     quickAccessSelected = true;
     selectedDate = null;
     query = '';
     selectedTagId = null;
     await _loadQuickAccess();
+    notifyListeners();
+  }
+
+  Future<void> selectTomorrowPlan() async {
+    await selectDate(tomorrow, notify: false);
+    tomorrowPlanSelected = true;
     notifyListeners();
   }
 
@@ -109,8 +136,14 @@ class PromptBoxController extends ChangeNotifier {
 
   Future<void> addPrompt(String content) async {
     if (content.trim().isEmpty) return;
-    if (selectedDate == null || dateKey(selectedDate!) != dateKey(today)) {
-      await selectDate(today);
+    final isPlan = tomorrowPlanSelected;
+    final target = isPlan ? tomorrow : today;
+    if (selectedDate == null || dateKey(selectedDate!) != dateKey(target)) {
+      if (isPlan) {
+        await selectTomorrowPlan();
+      } else {
+        await selectDate(target);
+      }
     }
     final now = _clock();
     currentDay!.entries.add(
@@ -136,6 +169,13 @@ class PromptBoxController extends ChangeNotifier {
     final nextName = trimmed.isEmpty ? null : trimmed;
     if (entry.outlineName == nextName) return;
     entry.outlineName = nextName;
+    entry.updatedAt = _clock();
+    notifyListeners();
+    await _persistEntry(entry);
+  }
+
+  Future<void> toggleCompleted(PromptEntry entry) async {
+    entry.completed = !entry.completed;
     entry.updatedAt = _clock();
     notifyListeners();
     await _persistEntry(entry);

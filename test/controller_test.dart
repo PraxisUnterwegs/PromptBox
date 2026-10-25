@@ -34,6 +34,131 @@ void main() {
     await controller.selectDate(DateTime(2026, 9, 18));
     expect(controller.currentDay!.entries.single.content, '第一天');
   });
+  test('明日计划在零点成为今天，下一天计划栏为空且不重复转入', () async {
+    now = DateTime(2026, 9, 18, 23, 59, 59);
+    await controller.selectTomorrowPlan();
+    await controller.addPrompt('# 明早先完成实验\n对照组与结果记录');
+    final plan = controller.currentDay!.entries.single;
+    await controller.setOutlineName(plan, '早起第一件事');
+    await controller.toggleTag(plan, 'research');
+    await controller.toggleQuickAccess(plan);
+    await controller.selectDate(DateTime(2026, 9, 18));
+    expect(controller.currentDay!.entries, isEmpty);
+
+    now = DateTime(2026, 9, 19);
+    await controller.checkDateRollover();
+    expect(controller.selectedDate, DateTime(2026, 9, 19));
+    expect(controller.currentDay!.entries.single.id, plan.id);
+    expect(controller.currentDay!.entries.single.outlineTitle, '早起第一件事');
+    expect(controller.currentDay!.entries.single.tagIds, ['research']);
+    await controller.checkDateRollover();
+    await controller.checkDateRollover();
+    expect(controller.currentDay!.entries, hasLength(1));
+    await controller.selectTomorrowPlan();
+    expect(controller.selectedDate, DateTime(2026, 9, 20));
+    expect(controller.currentDay!.entries, isEmpty);
+    await controller.selectQuickAccess();
+    expect(controller.quickAccessEntries.single.id, plan.id);
+  });
+
+  test('明日计划重启仍保留，离线跨多天后留在应属日期', () async {
+    await controller.selectTomorrowPlan();
+    await controller.addPrompt('明天的任务');
+    final restarted = PromptBoxController(
+      store: JsonPromptStore(temp.path),
+      clock: () => now,
+    );
+    addTearDown(restarted.dispose);
+    await restarted.initialize();
+    await restarted.selectTomorrowPlan();
+    expect(restarted.currentDay!.entries.single.content, '明天的任务');
+
+    now = DateTime(2026, 9, 23, 8);
+    await restarted.initialize();
+    expect(restarted.currentDay!.entries, isEmpty);
+    await restarted.selectDate(DateTime(2026, 9, 19));
+    expect(restarted.currentDay!.entries.single.content, '明天的任务');
+    await restarted.selectTomorrowPlan();
+    expect(restarted.currentDay!.entries, isEmpty);
+  });
+
+  test('明日计划支持编辑排序删除，重启后内容顺序正确', () async {
+    await controller.selectTomorrowPlan();
+    await controller.addPrompt('任务 A');
+    now = now.add(const Duration(seconds: 1));
+    await controller.addPrompt('任务 B');
+    now = now.add(const Duration(seconds: 1));
+    await controller.addPrompt('任务 C');
+    await controller.movePrompt(controller.currentDay!.entries.last, -1);
+    await controller.editPrompt(controller.currentDay!.entries[1], '任务 C 修改');
+    await controller.deletePrompt(controller.currentDay!.entries.last);
+    final saved = await JsonPromptStore(
+      temp.path,
+    ).readDay(DateTime(2026, 9, 19));
+    expect(saved.entries.map((e) => e.content), ['任务 A', '任务 C 修改']);
+    expect(controller.tomorrowPlanSelected, isTrue);
+  });
+
+  test('零点后计时器尚未刷新时，新增计划仍写入新的明天', () async {
+    now = DateTime(2026, 12, 31, 23, 59, 59);
+    await controller.selectTomorrowPlan();
+    await controller.addPrompt('元旦任务');
+    now = DateTime(2027, 1, 1, 0, 0, 1);
+    await controller.addPrompt('一月二日任务');
+    expect(controller.selectedDate, DateTime(2027, 1, 2));
+    final store = JsonPromptStore(temp.path);
+    expect(
+      (await store.readDay(DateTime(2027, 1, 1))).entries.single.content,
+      '元旦任务',
+    );
+    expect(
+      (await store.readDay(DateTime(2027, 1, 2))).entries.single.content,
+      '一月二日任务',
+    );
+  });
+
+  test('月末闰日目标日期与零点倒计时正确', () {
+    now = DateTime(2028, 2, 28, 23, 59, 59);
+    expect(controller.tomorrow, DateTime(2028, 2, 29));
+    expect(controller.timeUntilNextDay, const Duration(seconds: 1));
+    now = DateTime(2028, 2, 29, 23, 59, 59);
+    expect(controller.tomorrow, DateTime(2028, 3, 1));
+  });
+
+  test('完成勾选可取消，并在明日计划跨天、快速访问和重启后保持同步', () async {
+    await controller.selectTomorrowPlan();
+    await controller.addPrompt('计划和普通 Prompt 都可以勾选');
+    final entry = controller.currentDay!.entries.single;
+    expect(entry.completed, isFalse);
+    await controller.toggleCompleted(entry);
+    expect(entry.completed, isTrue);
+    await controller.toggleQuickAccess(entry);
+    await controller.selectQuickAccess();
+    expect(controller.quickAccessEntries.single.completed, isTrue);
+    await controller.toggleCompleted(controller.quickAccessEntries.single);
+    expect(
+      (await JsonPromptStore(
+        temp.path,
+      ).readDay(DateTime(2026, 9, 19))).entries.single.completed,
+      isFalse,
+    );
+    await controller.toggleCompleted(controller.quickAccessEntries.single);
+    now = DateTime(2026, 9, 19, 8);
+    await controller.checkDateRollover();
+    expect(controller.currentDay!.entries.single.completed, isTrue);
+    expect(controller.currentDay!.entries.single.content, entry.content);
+
+    final restarted = PromptBoxController(
+      store: JsonPromptStore(temp.path),
+      clock: () => now,
+    );
+    addTearDown(restarted.dispose);
+    await restarted.initialize();
+    expect(restarted.currentDay!.entries.single.completed, isTrue);
+    final legacy = entry.toJson()..remove('completed');
+    expect(PromptEntry.fromJson(legacy).completed, isFalse);
+  });
+
   test('正文和标签均可过滤', () async {
     await controller.createTag('DMP', 0xff0000ff);
     await controller.addPrompt('轨迹平滑');

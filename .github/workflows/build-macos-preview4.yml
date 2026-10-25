@@ -2,10 +2,6 @@ name: Add macOS ARM64 to Preview 4
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/build-macos-preview4.yml
 
 permissions:
   contents: read
@@ -96,4 +92,3 @@ jobs:
           set -euo pipefail
           gh release view "$RELEASE_TAG"
           gh release upload "$RELEASE_TAG" dist/PromptBox-preview-macos-arm64.dmg --clobber
-          gh release edit "$RELEASE_TAG" --notes-file .github/release-notes-preview.md

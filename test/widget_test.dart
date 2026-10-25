@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,90 @@ import 'package:prompt_box/storage.dart';
 import 'package:prompt_box/wysiwyg_editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _MemoryPromptStore implements PromptStore {
+  final _days = <String, Map<String, Object?>>{};
+  @override
+  String get rootPath => '/test-database';
+  @override
+  Future<DayRecord> readDay(DateTime date) async {
+    final json = _days[dateKey(date)];
+    return json == null ? DayRecord(date: date) : DayRecord.fromJson(json);
+  }
+
+  @override
+  Future<void> writeDay(DayRecord day) async {
+    _days[dateKey(day.date)] = day.toJson();
+  }
+
+  @override
+  Future<List<DateTime>> listDays() async =>
+      _days.keys.map(DateTime.parse).toList();
+  @override
+  Future<List<TagDefinition>> readTags() async => [];
+  @override
+  Future<void> writeTags(List<TagDefinition> tags) async {}
+  @override
+  Future<List<WeekNote>> readWeekNotes() async => [];
+  @override
+  Future<void> writeWeekNotes(List<WeekNote> notes) async {}
+  @override
+  Future<List<QuickAccessReference>> readQuickAccess() async => [];
+  @override
+  Future<void> writeQuickAccess(List<QuickAccessReference> references) async {}
+}
+
 void main() {
+  testWidgets('明日计划入口在快速访问下方，零点计时器自动刷新为今天', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.binding.setSurfaceSize(const Size(1300, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var now = DateTime(2026, 10, 25, 23, 59, 59);
+    final controller = PromptBoxController(
+      store: _MemoryPromptStore(),
+      clock: () => now,
+    );
+    addTearDown(controller.dispose);
+    await tester.runAsync(() async {
+      await controller.initialize();
+      await controller.selectTomorrowPlan();
+      await controller.addPrompt('明早先复现实验');
+    });
+    await tester.pumpWidget(PromptBoxApp(controller: controller));
+    await tester.pump();
+    final planTile = find.widgetWithText(ListTile, '明日计划');
+    expect(
+      tester.getTopLeft(planTile).dy,
+      greaterThan(tester.getTopLeft(find.widgetWithText(ListTile, '快速访问')).dy),
+    );
+    expect(find.byType(Composer), findsOneWidget);
+    expect(find.text('大纲'), findsOneWidget);
+    expect(find.text('明早先复现实验'), findsWidgets);
+
+    final switched = Completer<void>();
+    controller.addListener(() {
+      if (!controller.tomorrowPlanSelected &&
+          controller.selectedDate == DateTime(2026, 10, 26) &&
+          !switched.isCompleted) {
+        switched.complete();
+      }
+    });
+    now = DateTime(2026, 10, 26);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => switched.future.timeout(const Duration(seconds: 5)),
+    );
+    await tester.pump();
+    expect(controller.currentDay!.entries.single.content, '明早先复现实验');
+    await tester.runAsync(controller.selectTomorrowPlan);
+    await tester.pump();
+    expect(controller.currentDay!.entries, isEmpty);
+    expect(find.text('把明天要做的事写在这里'), findsOneWidget);
+    await tester.binding.setSurfaceSize(const Size(1300, 540));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('今天和历史会话显示大纲，未来日期不显示', () {
     final today = DateTime(2026, 9, 19, 9);
     expect(shouldShowConversationOutline(today, today), isTrue);
@@ -372,6 +456,58 @@ void main() {
     expect(find.byType(ExtendedMarkdownBody), findsNothing);
     await tester.tap(find.byTooltip('\u5c55\u5f00'));
     expect(toggled, isTrue);
+  });
+
+  testWidgets('气泡操作栏有常显完成框，可勾选绿色对勾并取消，窄宽度不溢出', (tester) async {
+    final now = DateTime(2026, 10, 25);
+    final entry = PromptEntry(
+      id: 'completion-test',
+      content: '任务正文',
+      createdAt: now,
+      updatedAt: now,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 390,
+            child: StatefulBuilder(
+              builder:
+                  (context, setState) => PromptBubble(
+                    entry: entry,
+                    tags: const [],
+                    collapsed: true,
+                    onToggleCompleted:
+                        () =>
+                            setState(() => entry.completed = !entry.completed),
+                    onEdit: () {},
+                    onDelete: () {},
+                    onMoveUp: () {},
+                    onMoveDown: () {},
+                    onToggleTag: (_) {},
+                    onCreateTag: (_, __, ___) async => null,
+                  ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    final checkbox = tester.widget<Checkbox>(find.byType(Checkbox));
+    expect(checkbox.value, isTrue);
+    expect(checkbox.checkColor, Colors.green.shade600);
+    expect(
+      checkbox.fillColor!.resolve({WidgetState.selected}),
+      Colors.transparent,
+    );
+    expect(find.byTooltip('已完成，点击取消'), findsOneWidget);
+    expect(find.text('任务正文'), findsOneWidget);
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('bubble exposes quick access pin state', (tester) async {

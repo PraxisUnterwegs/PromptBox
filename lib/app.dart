@@ -84,6 +84,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   final Set<String> _collapsedIds = {};
   bool _sending = false;
   Timer? _rolloverTimer;
+  Timer? _midnightTimer;
 
   PromptBoxController get controller => widget.controller;
 
@@ -95,12 +96,25 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
       const Duration(minutes: 1),
       (_) => controller.checkDateRollover(),
     );
+    _scheduleMidnightCheck();
+  }
+
+  void _scheduleMidnightCheck() {
+    _midnightTimer?.cancel();
+    _midnightTimer = Timer(controller.timeUntilNextDay, () async {
+      try {
+        await controller.checkDateRollover();
+      } finally {
+        if (mounted) _scheduleMidnightCheck();
+      }
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _rolloverTimer?.cancel();
+    _midnightTimer?.cancel();
     _composer.dispose();
     _search.dispose();
     super.dispose();
@@ -110,6 +124,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       controller.checkDateRollover();
+      _scheduleMidnightCheck();
     }
   }
 
@@ -144,11 +159,22 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
 
   bool get _showOutline =>
       controller.quickAccessSelected ||
+      controller.tomorrowPlanSelected ||
       shouldShowConversationOutline(controller.selectedDate, controller.today);
 
   Widget _conversation() => Column(
     children: [
       _toolbar(),
+      if (controller.tomorrowPlanSelected)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: Text(
+            '为明天安排具体任务；到达当天后自动进入“今天”，这里开始接收下一天的计划。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          ),
+        ),
       if (controller.error != null)
         MaterialBanner(
           content: Text(controller.error!),
@@ -179,6 +205,8 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
                           }),
                       inQuickAccess: controller.isInQuickAccess(entry),
                       onEdit: () => _editPrompt(entry),
+                      onToggleCompleted:
+                          () => controller.toggleCompleted(entry),
                       onDelete: () => _deletePrompt(entry),
                       onMoveUp: () => controller.movePrompt(entry, -1),
                       onMoveDown: () => controller.movePrompt(entry, 1),
@@ -216,6 +244,8 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
               Text(
                 controller.quickAccessSelected
                     ? '\u5feb\u901f\u8bbf\u95ee'
+                    : controller.tomorrowPlanSelected
+                    ? '明日计划'
                     : _dateTitle(controller.selectedDate ?? controller.today),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
@@ -281,6 +311,8 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
               ? '\u6ca1\u6709\u5339\u914d\u7ed3\u679c'
               : controller.quickAccessSelected
               ? '\u8fd8\u6ca1\u6709\u5feb\u901f\u8bbf\u95ee\u5185\u5bb9'
+              : controller.tomorrowPlanSelected
+              ? '把明天要做的事写在这里'
               : '\u628a\u60f3\u5230\u7684 Prompt \u5199\u5728\u8fd9\u91cc',
           style: Theme.of(context).textTheme.titleMedium,
         ),
@@ -517,67 +549,97 @@ class _NavigationRail extends StatelessWidget {
     width: 200,
     child: Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
-          child: Row(
-            children: [
-              Icon(
-                Icons.auto_awesome_mosaic,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'PromptBox',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_mosaic,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'PromptBox',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-        for (var offset = 0; offset < 3; offset++)
-          _dayTile(
-            context,
-            controller.today.subtract(Duration(days: offset)),
-            switch (offset) {
-              0 => '今天',
-              1 => '昨天',
-              _ => '前天',
-            },
-            switch (offset) {
-              0 => Icons.today,
-              1 => Icons.history,
-              _ => Icons.history_toggle_off,
-            },
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          child: ListTile(
-            selected: controller.quickAccessSelected,
-            selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+                for (var offset = 0; offset < 3; offset++)
+                  _dayTile(
+                    context,
+                    controller.today.subtract(Duration(days: offset)),
+                    switch (offset) {
+                      0 => '今天',
+                      1 => '昨天',
+                      _ => '前天',
+                    },
+                    switch (offset) {
+                      0 => Icons.today,
+                      1 => Icons.history,
+                      _ => Icons.history_toggle_off,
+                    },
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  child: ListTile(
+                    selected: controller.quickAccessSelected,
+                    selectedTileColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    leading: Badge(
+                      isLabelVisible: controller.quickAccessEntries.isNotEmpty,
+                      label: Text('${controller.quickAccessEntries.length}'),
+                      child: const Icon(Icons.star_outline),
+                    ),
+                    title: const Text('\u5feb\u901f\u8bbf\u95ee'),
+                    onTap: controller.selectQuickAccess,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  child: ListTile(
+                    selected: controller.tomorrowPlanSelected,
+                    selectedTileColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    leading: const Icon(Icons.event_note_outlined),
+                    title: const Text('明日计划'),
+                    subtitle: Text(
+                      DateFormat('M/d').format(controller.tomorrow),
+                    ),
+                    onTap: controller.selectTomorrowPlan,
+                  ),
+                ),
+                const Divider(indent: 14, endIndent: 14),
+                ListTile(
+                  leading: const Icon(Icons.archive_outlined),
+                  title: const Text('历史数据库'),
+                  onTap: onHistory,
+                ),
+              ],
             ),
-            leading: Badge(
-              isLabelVisible: controller.quickAccessEntries.isNotEmpty,
-              label: Text('${controller.quickAccessEntries.length}'),
-              child: const Icon(Icons.star_outline),
-            ),
-            title: const Text('\u5feb\u901f\u8bbf\u95ee'),
-            onTap: controller.selectQuickAccess,
           ),
         ),
-        const Divider(indent: 14, endIndent: 14),
-        ListTile(
-          leading: const Icon(Icons.archive_outlined),
-          title: const Text('历史数据库'),
-          onTap: onHistory,
-        ),
-        const Spacer(),
         ListTile(
           leading: const Icon(Icons.settings_outlined),
           title: const Text('设置'),
@@ -602,6 +664,7 @@ class _NavigationRail extends StatelessWidget {
   ) {
     final selected =
         !controller.quickAccessSelected &&
+        !controller.tomorrowPlanSelected &&
         controller.selectedDate != null &&
         dateKey(controller.selectedDate!) == dateKey(date);
     return Padding(
@@ -630,6 +693,7 @@ class PromptBubble extends StatelessWidget {
     this.inQuickAccess = false,
     this.onToggleQuickAccess,
     this.showDate = false,
+    this.onToggleCompleted,
     required this.onDelete,
     required this.onMoveUp,
     required this.onMoveDown,
@@ -643,6 +707,7 @@ class PromptBubble extends StatelessWidget {
   final bool inQuickAccess;
   final VoidCallback? onToggleQuickAccess;
   final bool showDate;
+  final VoidCallback? onToggleCompleted;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onMoveUp;
@@ -718,63 +783,101 @@ class PromptBubble extends StatelessWidget {
                       color: Theme.of(context).colorScheme.outline,
                     ),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: collapsed ? '\u5c55\u5f00' : '\u6298\u53e0',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onToggleCollapsed,
-                    icon: Icon(
-                      collapsed ? Icons.expand_more : Icons.expand_less,
-                      size: 19,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Tooltip(
+                          message: entry.completed ? '已完成，点击取消' : '标记完成',
+                          child: Checkbox(
+                            value: entry.completed,
+                            onChanged:
+                                onToggleCompleted == null
+                                    ? null
+                                    : (_) => onToggleCompleted!(),
+                            fillColor: const WidgetStatePropertyAll(
+                              Colors.transparent,
+                            ),
+                            checkColor:
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.green.shade400
+                                    : Colors.green.shade600,
+                            side: WidgetStateBorderSide.resolveWith(
+                              (states) => BorderSide(
+                                color:
+                                    states.contains(WidgetState.selected)
+                                        ? Colors.green
+                                        : Theme.of(context).colorScheme.outline,
+                                width: 1.2,
+                              ),
+                            ),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            semanticLabel: entry.completed ? '已完成' : '未完成',
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: collapsed ? '\u5c55\u5f00' : '\u6298\u53e0',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onToggleCollapsed,
+                          icon: Icon(
+                            collapsed ? Icons.expand_more : Icons.expand_less,
+                            size: 19,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip:
+                              inQuickAccess
+                                  ? '\u79fb\u51fa\u5feb\u901f\u8bbf\u95ee'
+                                  : '\u52a0\u5165\u5feb\u901f\u8bbf\u95ee',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onToggleQuickAccess,
+                          icon: Icon(
+                            inQuickAccess ? Icons.star : Icons.star_border,
+                            size: 19,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '复制 Markdown',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _copyMarkdown(context),
+                          icon: const Icon(Icons.content_copy, size: 19),
+                        ),
+                        IconButton(
+                          tooltip: '添加或移除标签',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _chooseTag(context),
+                          icon: const Icon(Icons.label_outline, size: 19),
+                        ),
+                        IconButton(
+                          tooltip: '上移',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onMoveUp,
+                          icon: const Icon(Icons.arrow_upward, size: 19),
+                        ),
+                        IconButton(
+                          tooltip: '下移',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onMoveDown,
+                          icon: const Icon(Icons.arrow_downward, size: 19),
+                        ),
+                        IconButton(
+                          tooltip: '编辑',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined, size: 19),
+                        ),
+                        IconButton(
+                          tooltip: '删除',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline, size: 19),
+                        ),
+                      ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip:
-                        inQuickAccess
-                            ? '\u79fb\u51fa\u5feb\u901f\u8bbf\u95ee'
-                            : '\u52a0\u5165\u5feb\u901f\u8bbf\u95ee',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onToggleQuickAccess,
-                    icon: Icon(
-                      inQuickAccess ? Icons.star : Icons.star_border,
-                      size: 19,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '复制 Markdown',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => _copyMarkdown(context),
-                    icon: const Icon(Icons.content_copy, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: '添加或移除标签',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => _chooseTag(context),
-                    icon: const Icon(Icons.label_outline, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: '上移',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onMoveUp,
-                    icon: const Icon(Icons.arrow_upward, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: '下移',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onMoveDown,
-                    icon: const Icon(Icons.arrow_downward, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: '编辑',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: '删除',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline, size: 19),
                   ),
                 ],
               ),
