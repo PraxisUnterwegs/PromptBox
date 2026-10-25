@@ -131,9 +131,22 @@ jobs:
           mkdir -p "$package_root" dist
           ditto "$app" "$package_root/PromptBox.app"
           ln -s /Applications "$package_root/Applications"
-          hdiutil create -volname "PromptBox Preview $PREVIEW_NUMBER" \
-            -srcfolder "$package_root" -format UDZO \
-            dist/PromptBox-preview-macos-arm64.dmg
+          for attempt in 1 2 3; do
+            if dmg_output=$(hdiutil create -ov -fs HFS+ \
+              -volname "PromptBox Preview $PREVIEW_NUMBER" \
+              -srcfolder "$package_root" -format UDZO \
+              dist/PromptBox-preview-macos-arm64.dmg 2>&1); then
+              printf '%s\n' "$dmg_output"
+              break
+            fi
+            printf '%s\n' "$dmg_output"
+            if [ "$attempt" = 3 ]; then
+              echo "::error title=DMG creation::$(printf '%s' "$dmg_output" | tr '\n' ' ')"
+              df -h
+              exit 1
+            fi
+            sleep 5
+          done
           hdiutil verify dist/PromptBox-preview-macos-arm64.dmg
       - uses: actions/upload-artifact@v4
         with:
