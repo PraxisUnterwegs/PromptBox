@@ -127,9 +127,7 @@ class AppUpdateService extends ChangeNotifier {
     Future<String> Function()? loadVersion,
     Future<Directory> Function()? tempDirectory,
   }) : _createClient = createClient ?? HttpClient.new,
-       _loadVersion =
-           loadVersion ??
-           (() async => (await PackageInfo.fromPlatform()).version),
+       _loadVersion = loadVersion ?? _readInstalledVersion,
        _tempDirectory = tempDirectory ?? getTemporaryDirectory;
   final HttpClient Function() _createClient;
   final Future<String> Function() _loadVersion;
@@ -143,6 +141,32 @@ class AppUpdateService extends ChangeNotifier {
   double? progress;
   Directory? _staging;
   bool _disposed = false;
+
+  static Future<String> _readInstalledVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return installedVersionFor(
+      info.version,
+      info.buildNumber,
+      Platform.operatingSystem,
+    );
+  }
+
+  /// Flutter 3.29 converts 0.1.0-preview.7 to 0.1.0.7 for Apple's
+  /// CFBundleShortVersionString. Recover this repository's preview version
+  /// only when its suffix matches the native build number.
+  static String installedVersionFor(
+    String version,
+    String buildNumber,
+    String os,
+  ) {
+    if (os == 'macos') {
+      final match = RegExp(r'^(\d+\.\d+\.\d+)\.(\d+)$').firstMatch(version);
+      if (match != null && match[2] == buildNumber) {
+        return '${match[1]}-preview.${match[2]}';
+      }
+    }
+    return version;
+  }
 
   static String assetFor(String os, Abi abi) => switch ((os, abi)) {
     ('windows', Abi.windowsX64) => 'PromptBox-preview-windows-x64.zip',

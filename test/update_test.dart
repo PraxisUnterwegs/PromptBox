@@ -59,6 +59,45 @@ class FakeUpdates extends AppUpdateService {
 }
 
 void main() {
+  test('苹果平台原生数字版本恢复为预览语义版本，其他平台和正式版保持原值', () {
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0.7', '7', 'macos'),
+      '0.1.0-preview.7',
+    );
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0.10', '10', 'macos'),
+      '0.1.0-preview.10',
+    );
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0', '7', 'macos'),
+      '0.1.0',
+    );
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0.7', '8', 'macos'),
+      '0.1.0.7',
+    );
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0-preview.7', '7', 'windows'),
+      '0.1.0-preview.7',
+    );
+    expect(
+      AppUpdateService.installedVersionFor('0.1.0-preview.7', '7', 'linux'),
+      '0.1.0-preview.7',
+    );
+    final current = AppUpdateService.installedVersionFor(
+      '0.1.0.9',
+      '9',
+      'macos',
+    );
+    expect(
+      UpdateRelease.select(
+        [releaseData('v0.1.0-preview.10')],
+        current,
+        assetName,
+      )!.tag,
+      'v0.1.0-preview.10',
+    );
+  });
   test('版本按数字比较，preview.10 大于 preview.9，正式版大于预览版', () {
     expect(
       ReleaseVersion.parse(

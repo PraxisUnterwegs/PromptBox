@@ -21,5 +21,14 @@ void main() {
     final workflow =
         File('.github/workflows/release-preview.yml').readAsStringSync();
     expect(workflow, contains('PREVIEW_NUMBER: "$build"'));
+    final appleVersion = parts.first.replaceAll(RegExp(r'[^\d.]'), '');
+    final appleCheck = workflow
+        .split('\n')
+        .firstWhere(
+          (line) =>
+              line.contains('test "') &&
+              line.contains('CFBundleShortVersionString'),
+        );
+    expect(appleCheck.trim(), endsWith('= $appleVersion'));
   });
 }
