@@ -26,6 +26,28 @@ class PromptBoxController extends ChangeNotifier {
   String? error;
   bool loading = true;
   AppThemePreference themePreference = AppThemePreference.system;
+  double fontScale = 1;
+  double viewScale = 1;
+
+  static double _readScale(String? value, double min, double max) {
+    final parsed = double.tryParse(value ?? '');
+    return parsed != null && parsed.isFinite ? parsed.clamp(min, max) : 1;
+  }
+
+  Future<void> setFontScale(double value) async {
+    final next = _readScale('$value', .75, 2);
+    await AppPreferences.writeString(AppPreferences.fontScaleKey, '$next');
+    fontScale = next;
+    notifyListeners();
+  }
+
+  Future<void> setViewScale(double value) async {
+    final next = _readScale('$value', .75, 1.5);
+    await AppPreferences.writeString(AppPreferences.viewScaleKey, '$next');
+    viewScale = next;
+    notifyListeners();
+  }
+
   DateTime? _knownToday;
 
   String get databasePath => _store.rootPath;
@@ -44,6 +66,16 @@ class PromptBoxController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
+      fontScale = _readScale(
+        await AppPreferences.readString(AppPreferences.fontScaleKey),
+        .75,
+        2,
+      );
+      viewScale = _readScale(
+        await AppPreferences.readString(AppPreferences.viewScaleKey),
+        .75,
+        1.5,
+      );
       final storedTheme = await AppPreferences.readString(
         AppPreferences.themePreferenceKey,
       );

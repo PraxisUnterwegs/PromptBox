@@ -10,6 +10,9 @@ import 'package:path/path.dart' as p;
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import 'app_controller.dart';
+import 'app_update.dart';
+import 'display_scale.dart';
+import 'update_settings.dart';
 import 'markdown_extensions.dart';
 import 'models.dart';
 import 'storage.dart';
@@ -44,6 +47,12 @@ class PromptBoxApp extends StatelessWidget {
           },
           theme: _theme(Brightness.light),
           darkTheme: _theme(Brightness.dark),
+          builder:
+              (context, child) => DisplayScale(
+                fontScale: controller.fontScale,
+                viewScale: controller.viewScale,
+                child: child!,
+              ),
           home: PromptBoxHome(controller: controller),
         ),
   );
@@ -80,6 +89,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     with WidgetsBindingObserver {
   final _composer = WysiwygMarkdownController();
   final _search = TextEditingController();
+  final _updater = AppUpdateService();
   final _itemScroll = ItemScrollController();
   final Set<String> _collapsedIds = {};
   bool _sending = false;
@@ -117,6 +127,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     _midnightTimer?.cancel();
     _composer.dispose();
     _search.dispose();
+    _updater.dispose();
     super.dispose();
   }
 
@@ -520,7 +531,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   );
   Future<void> _showSettings() async => showDialog<void>(
     context: context,
-    builder: (_) => SettingsDialog(controller: controller),
+    builder: (_) => SettingsDialog(controller: controller, updater: _updater),
   );
 
   String _dateTitle(DateTime date) {
@@ -1770,8 +1781,13 @@ class _HistoryDialogState extends State<HistoryDialog> {
 }
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.controller});
+  const SettingsDialog({
+    super.key,
+    required this.controller,
+    required this.updater,
+  });
   final PromptBoxController controller;
+  final AppUpdateService updater;
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -1783,74 +1799,105 @@ class _SettingsDialogState extends State<SettingsDialog> {
     title: const Text('设置'),
     content: SizedBox(
       width: 560,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('外观', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          SegmentedButton<AppThemePreference>(
-            segments: const [
-              ButtonSegment(
-                value: AppThemePreference.system,
-                icon: Icon(Icons.brightness_auto),
-                label: Text('跟随系统'),
+      child: SingleChildScrollView(
+        child: ListenableBuilder(
+          listenable: widget.controller,
+          builder:
+              (context, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('外观', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  SegmentedButton<AppThemePreference>(
+                    segments: const [
+                      ButtonSegment(
+                        value: AppThemePreference.system,
+                        icon: Icon(Icons.brightness_auto),
+                        label: Text('跟随系统'),
+                      ),
+                      ButtonSegment(
+                        value: AppThemePreference.light,
+                        icon: Icon(Icons.light_mode),
+                        label: Text('浅色'),
+                      ),
+                      ButtonSegment(
+                        value: AppThemePreference.dark,
+                        icon: Icon(Icons.dark_mode),
+                        label: Text('深色'),
+                      ),
+                    ],
+                    selected: {widget.controller.themePreference},
+                    onSelectionChanged:
+                        (values) =>
+                            widget.controller.setThemePreference(values.first),
+                  ),
+                  const SizedBox(height: 24),
+                  _scaleControl(
+                    '字体大小',
+                    widget.controller.fontScale,
+                    .75,
+                    2,
+                    widget.controller.setFontScale,
+                  ),
+                  _scaleControl(
+                    '界面比例',
+                    widget.controller.viewScale,
+                    .75,
+                    1.5,
+                    widget.controller.setViewScale,
+                  ),
+                  const Text('两项独立生效并自动保存。界面放大后若空间不足，可横向滚动；使用“重置”恢复 100%。'),
+                  const SizedBox(height: 24),
+                  UpdateSettings(
+                    service: widget.updater,
+                    databasePath: widget.controller.databasePath,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    '历史数据库目录',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    widget.controller.databasePath,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _changePath,
+                        icon: const Icon(Icons.folder_open),
+                        label: const Text('迁移到其他目录'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _backup,
+                        icon: const Icon(Icons.backup_outlined),
+                        label: const Text('导出备份'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _restore,
+                        icon: const Icon(Icons.restore),
+                        label: const Text('从备份恢复'),
+                      ),
+                    ],
+                  ),
+                  if (_busy)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: LinearProgressIndicator(),
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '迁移后路径会被记住，重启应用仍从新目录读取。云盘同步目录由对应云盘客户端负责同步。',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
-              ButtonSegment(
-                value: AppThemePreference.light,
-                icon: Icon(Icons.light_mode),
-                label: Text('浅色'),
-              ),
-              ButtonSegment(
-                value: AppThemePreference.dark,
-                icon: Icon(Icons.dark_mode),
-                label: Text('深色'),
-              ),
-            ],
-            selected: {widget.controller.themePreference},
-            onSelectionChanged:
-                (values) => widget.controller.setThemePreference(values.first),
-          ),
-          const SizedBox(height: 24),
-          Text('历史数据库目录', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
-          SelectableText(
-            widget.controller.databasePath,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _changePath,
-                icon: const Icon(Icons.folder_open),
-                label: const Text('迁移到其他目录'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _backup,
-                icon: const Icon(Icons.backup_outlined),
-                label: const Text('导出备份'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _restore,
-                icon: const Icon(Icons.restore),
-                label: const Text('从备份恢复'),
-              ),
-            ],
-          ),
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.only(top: 16),
-              child: LinearProgressIndicator(),
-            ),
-          const SizedBox(height: 8),
-          Text(
-            '迁移后路径会被记住，重启应用仍从新目录读取。云盘同步目录由对应云盘客户端负责同步。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+        ),
       ),
     ),
     actions: [
@@ -1863,6 +1910,53 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   Future<String?> _pickDirectory() =>
       FilePicker.platform.getDirectoryPath(dialogTitle: '选择文件夹');
+
+  Widget _scaleControl(
+    String label,
+    double value,
+    double min,
+    double max,
+    Future<void> Function(double) change,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('$label：${(value * 100).round()}%'),
+      Row(
+        children: [
+          IconButton(
+            tooltip: '缩小$label',
+            onPressed:
+                _busy || value <= min
+                    ? null
+                    : () => _run(() => change(value - .05)),
+            icon: const Icon(Icons.remove),
+          ),
+          Expanded(
+            child: Slider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: ((max - min) * 20).round(),
+              label: '${(value * 100).round()}%',
+              onChanged: _busy ? null : (next) => _run(() => change(next)),
+            ),
+          ),
+          IconButton(
+            tooltip: '放大$label',
+            onPressed:
+                _busy || value >= max
+                    ? null
+                    : () => _run(() => change(value + .05)),
+            icon: const Icon(Icons.add),
+          ),
+          TextButton(
+            onPressed: _busy ? null : () => _run(() => change(1)),
+            child: const Text('重置'),
+          ),
+        ],
+      ),
+    ],
+  );
   Future<void> _changePath() async {
     final path = await _pickDirectory();
     if (path == null || path == widget.controller.databasePath) return;

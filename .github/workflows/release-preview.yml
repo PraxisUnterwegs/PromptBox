@@ -11,7 +11,7 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.29.2"
-  PREVIEW_NUMBER: "5"
+  PREVIEW_NUMBER: "6"
 
 jobs:
   linux:
@@ -75,6 +75,9 @@ jobs:
           flutter test
       - name: Build Windows release
         run: flutter build windows --release
+      - name: Test Windows update installer
+        shell: powershell
+        run: ./packaging/updater/test_windows.ps1
       - name: Package Windows portable preview
         shell: pwsh
         run: |
@@ -114,6 +117,8 @@ jobs:
           FLUTTER_XCODE_ONLY_ACTIVE_ARCH: "YES"
           FLUTTER_XCODE_CODE_SIGN_IDENTITY: "-"
         run: flutter build macos --release
+      - name: Check macOS update installer syntax
+        run: /bin/sh -n packaging/updater/install_macos.sh
       - name: Verify and package DMG
         shell: bash
         run: |
@@ -125,7 +130,7 @@ jobs:
           test "$(lipo -archs "$app/Contents/Frameworks/App.framework/App")" = arm64
           lipo "$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS" -verify_arch arm64
           codesign --verify --deep --strict --verbose=2 "$app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.1.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.1.0-preview.6
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$PREVIEW_NUMBER"
           package_root="$RUNNER_TEMP/promptbox-macos-dmg"
           mkdir -p "$package_root" dist

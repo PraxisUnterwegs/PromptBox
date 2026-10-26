@@ -24,6 +24,24 @@ void main() {
     controller.dispose();
     await temp.delete(recursive: true);
   });
+  test('字体与界面比例独立持久化，非法值回退且限制范围', () async {
+    await controller.setFontScale(1.4);
+    await controller.setViewScale(.8);
+    final reopened = PromptBoxController(store: JsonPromptStore(temp.path));
+    addTearDown(reopened.dispose);
+    await reopened.initialize();
+    expect(reopened.fontScale, 1.4);
+    expect(reopened.viewScale, .8);
+    await reopened.setFontScale(99);
+    await reopened.setViewScale(.01);
+    expect(reopened.fontScale, 2);
+    expect(reopened.viewScale, .75);
+    await AppPreferences.writeString(AppPreferences.fontScaleKey, 'NaN');
+    await AppPreferences.writeString(AppPreferences.viewScaleKey, 'Infinity');
+    await reopened.initialize();
+    expect(reopened.fontScale, 1);
+    expect(reopened.viewScale, 1);
+  });
   test('停机跨多天后，今天窗口为空且旧数据留在历史日期', () async {
     await controller.addPrompt('第一天');
     now = DateTime(2026, 9, 23, 9);

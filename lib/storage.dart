@@ -158,6 +158,28 @@ class StorageLocation {
     final selected = await AppPreferences.readString(_preferenceKey);
     if (selected != null && selected.isNotEmpty) return selected;
     final support = await getApplicationSupportDirectory();
+    // Older macOS previews used App Sandbox. Keep their default database in
+    // place when upgrading to the direct-distribution updater build.
+    if (Platform.isMacOS) {
+      final home = Platform.environment['HOME'];
+      if (home != null) {
+        final legacy = p.join(
+          home,
+          'Library',
+          'Containers',
+          'com.promptbox.promptBox',
+          'Data',
+          'Library',
+          'Application Support',
+          'com.promptbox.promptBox',
+          'PromptBox',
+        );
+        if (await Directory(legacy).exists()) {
+          await remember(legacy);
+          return legacy;
+        }
+      }
+    }
     return p.join(support.path, 'PromptBox');
   }
 
@@ -194,6 +216,8 @@ class StorageLocation {
 class AppPreferences {
   static const databasePathKey = 'database_path';
   static const themePreferenceKey = 'theme_preference';
+  static const fontScaleKey = 'font_scale';
+  static const viewScaleKey = 'view_scale';
 
   static Future<String?> readString(String key) async {
     final preferences = await SharedPreferences.getInstance();

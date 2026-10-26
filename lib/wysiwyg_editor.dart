@@ -165,6 +165,8 @@ class WysiwygMarkdownEditor extends StatelessWidget {
                     ...standardCommandShortcutEvents,
                   ],
                   editorStyle: EditorStyle.desktop(
+                    textScaleFactor:
+                        MediaQuery.textScalerOf(context).scale(15) / 15,
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                     cursorColor: Theme.of(context).colorScheme.primary,
                     selectionColor: Theme.of(

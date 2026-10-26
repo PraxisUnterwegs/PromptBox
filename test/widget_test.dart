@@ -49,6 +49,35 @@ class _MemoryPromptStore implements PromptStore {
 }
 
 void main() {
+  testWidgets('最大缩放下设置可滚动操作，编辑器跟随字体比例且草稿保留', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.binding.setSurfaceSize(const Size(1300, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = PromptBoxController(store: _MemoryPromptStore());
+    addTearDown(controller.dispose);
+    await tester.runAsync(controller.initialize);
+    await tester.pumpWidget(PromptBoxApp(controller: controller));
+    final composer = tester.widget<Composer>(find.byType(Composer)).controller;
+    composer.setMarkdown('尚未发送的草稿');
+    await tester.runAsync(() async {
+      await controller.setFontScale(2);
+      await controller.setViewScale(1.5);
+    });
+    await tester.pumpAndSettle();
+    expect(composer.markdown, '尚未发送的草稿');
+    final editor = tester.widget<AppFlowyEditor>(find.byType(AppFlowyEditor));
+    expect(editor.editorStyle.textScaleFactor, 2);
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('字体大小：200%'), findsOneWidget);
+    expect(find.text('界面比例：150%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(composer.markdown, '尚未发送的草稿');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('明日计划入口在快速访问下方，零点计时器自动刷新为今天', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.binding.setSurfaceSize(const Size(1300, 850));
