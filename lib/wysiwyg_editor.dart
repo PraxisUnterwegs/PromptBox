@@ -3,8 +3,14 @@ import 'dart:async';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:appflowy_editor_plugins/appflowy_editor_plugins.dart';
 import 'package:flutter/material.dart';
+// AppFlowy 2.5 does not export its cursor-preserving node insertion helpers.
+// ignore: implementation_imports
+import 'package:appflowy_editor/src/editor/editor_component/service/shortcuts/command/copy_paste_extension.dart';
 
 import 'markdown_extensions.dart';
+import 'image_storage.dart';
+import 'prompt_clipboard.dart';
+import 'rich_text_import.dart';
 
 final _formatFenceToCodeBlock = CharacterShortcutEvent(
   key: 'format fenced code marker to code block',
@@ -34,9 +40,111 @@ class WysiwygMarkdownController extends ChangeNotifier {
   late EditorState editorState;
   StreamSubscription<(TransactionTime, Transaction)>? _subscription;
   String _markdown = '';
+  final List<PendingImage> images = [];
+  bool pasting = false;
+  bool _disposed = false;
 
   String get markdown => _markdown;
-  bool get isEmpty => _markdown.trim().isEmpty;
+  bool get isEmpty => _markdown.trim().isEmpty && images.isEmpty;
+
+  void replaceImages(List<PendingImage> value) {
+    images
+      ..clear()
+      ..addAll(value);
+    notifyListeners();
+  }
+
+  void removeImage(PendingImage image) {
+    images.remove(image);
+    notifyListeners();
+  }
+
+  Future<void> pasteFromClipboard({
+    bool plainText = false,
+    bool allowImages = true,
+  }) async {
+    if (pasting) return;
+    pasting = true;
+    notifyListeners();
+    try {
+      final data = await PromptClipboard.read();
+      if (!_disposed) {
+        await pasteData(data, plainText: plainText, allowImages: allowImages);
+      }
+    } finally {
+      if (!_disposed) {
+        pasting = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> pasteData(
+    PromptClipboardData data, {
+    bool plainText = false,
+    bool allowImages = true,
+  }) async {
+    final text = data.text ?? '';
+    final sourceIsMarkdown = RegExp(
+      r'(^|\n)\s{0,3}(#{1,6} |[-*+] |\d+[.)] |```)|\*\*[^\n]+\*\*|\*[^\s*][^\n]*\*|__[^\n]+__',
+    ).hasMatch(text);
+    Document? document;
+    if (!plainText &&
+        !sourceIsMarkdown &&
+        data.html?.trim().isNotEmpty == true) {
+      final rich = documentFromClipboardHtml(data.html!);
+      if (rich.root.children.any(
+        (node) =>
+            node.delta?.toPlainText().trim().isNotEmpty == true ||
+            node.children.isNotEmpty,
+      )) {
+        document = rich;
+      }
+    }
+    if (!plainText && document == null && data.images.isNotEmpty) {
+      if (!allowImages) throw StateError('请在聊天输入框中粘贴图片');
+      final decoded = <PendingImage>[];
+      for (final bytes in data.images) {
+        decoded.add(await PendingImage.decode(bytes));
+      }
+      if (!_disposed) {
+        images.addAll(decoded);
+        notifyListeners();
+      }
+      return;
+    }
+    if (document == null && text.isEmpty) return;
+    document ??=
+        plainText
+            ? Document(
+              root: pageNode(
+                children:
+                    text
+                        .replaceAll('\r\n', '\n')
+                        .replaceAll('\r', '\n')
+                        .split('\n')
+                        .map(
+                          (line) => paragraphNode(delta: Delta()..insert(line)),
+                        )
+                        .toList(),
+              ),
+            )
+            : markdownToDocument(
+              prepareExtendedMarkdown(text),
+              customParsers: [MathBlockMarkdownParser()],
+              customInlineSyntaxes: [InlineMathSyntax()],
+            );
+    final nodes = document.root.children.toList();
+    if (nodes.isEmpty || _disposed) return;
+    editorState.selection ??= Selection.collapsed(Position(path: [0]));
+    if (nodes.length == 1) {
+      await editorState.pasteSingleLineNode(nodes.first);
+    } else {
+      await editorState.pasteMultiLineNodes(nodes);
+    }
+    _markdown = _exportMarkdown();
+    notifyListeners();
+  }
 
   void setMarkdown(String value) {
     _subscription?.cancel();
@@ -45,7 +153,10 @@ class WysiwygMarkdownController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clear() => setMarkdown('');
+  void clear() {
+    images.clear();
+    setMarkdown('');
+  }
 
   /// Rebuilds the WYSIWYG document from its current Markdown representation.
   /// This is intentionally manual so a user can recover if an editor shortcut
@@ -83,6 +194,7 @@ class WysiwygMarkdownController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _subscription?.cancel();
     editorState.dispose();
     super.dispose();
@@ -96,22 +208,35 @@ class WysiwygMarkdownEditor extends StatelessWidget {
     this.autoFocus = false,
     this.showToolbar = true,
     this.onSubmit,
+    this.allowImages = true,
   });
 
   final WysiwygMarkdownController controller;
   final bool autoFocus;
   final bool showToolbar;
   final VoidCallback? onSubmit;
+  final bool allowImages;
+
+  Future<void> _paste(BuildContext context, {bool plain = false}) async {
+    try {
+      await controller.pasteFromClipboard(
+        plainText: plain,
+        allowImages: allowImages,
+      );
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('粘贴失败：$error')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final compactParagraphConfiguration = BlockComponentConfiguration(
-      padding: (_) => EdgeInsets.zero,
-      textStyle:
-          (node) =>
-              node.delta?.isEmpty ?? true
-                  ? const TextStyle(fontSize: 8, height: 1)
-                  : const TextStyle(height: 1.18),
+      padding: (_) => const EdgeInsets.symmetric(vertical: 3),
+      textStyle: (node) => const TextStyle(height: 1.4),
     );
     return ListenableBuilder(
       listenable: controller,
@@ -120,12 +245,31 @@ class WysiwygMarkdownEditor extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (showToolbar)
-                _EditorToolbar(editorState: controller.editorState),
+                _EditorToolbar(
+                  editorState: controller.editorState,
+                  onPaste: controller.pasting ? null : () => _paste(context),
+                ),
               Expanded(
                 child: AppFlowyEditor(
                   key: ValueKey(controller.editorState),
                   editorState: controller.editorState,
                   autoFocus: autoFocus,
+                  contextMenuItems: [
+                    [
+                      ContextMenuItem(
+                        getName: () => '剪切',
+                        onPressed: handleCut,
+                      ),
+                      ContextMenuItem(
+                        getName: () => '复制',
+                        onPressed: handleCopy,
+                      ),
+                      ContextMenuItem(
+                        getName: () => '粘贴',
+                        onPressed: (_) => _paste(context),
+                      ),
+                    ],
+                  ],
                   blockComponentBuilders: {
                     ...standardBlockComponentBuilderMap,
                     ParagraphBlockKeys.type: ParagraphBlockComponentBuilder(
@@ -151,11 +295,32 @@ class WysiwygMarkdownEditor extends StatelessWidget {
                     ...standardCharacterShortcutEvents,
                   ],
                   commandShortcutEvents: [
+                    CommandShortcutEvent(
+                      key: 'promptbox paste',
+                      getDescription: () => '粘贴图片 / Markdown / 富文本',
+                      command: 'ctrl+v',
+                      macOSCommand: 'cmd+v',
+                      handler: (_) {
+                        _paste(context);
+                        return KeyEventResult.handled;
+                      },
+                    ),
+                    CommandShortcutEvent(
+                      key: 'promptbox paste plain',
+                      getDescription: () => '粘贴纯文本',
+                      command: 'ctrl+shift+v',
+                      macOSCommand: 'cmd+shift+v',
+                      handler: (_) {
+                        _paste(context, plain: true);
+                        return KeyEventResult.handled;
+                      },
+                    ),
                     if (onSubmit != null)
                       CommandShortcutEvent(
                         key: 'send prompt',
                         getDescription: () => '发送 Prompt',
                         command: 'ctrl+enter',
+                        macOSCommand: 'cmd+enter',
                         handler: (_) {
                           onSubmit!();
                           return KeyEventResult.handled;
@@ -175,7 +340,7 @@ class WysiwygMarkdownEditor extends StatelessWidget {
                     textStyleConfiguration: TextStyleConfiguration(
                       text: TextStyle(
                         fontSize: 15,
-                        height: 1.18,
+                        height: 1.4,
                         color: Theme.of(context).colorScheme.onSurface,
                       ),
                       bold: const TextStyle(fontWeight: FontWeight.w700),
@@ -200,8 +365,9 @@ class WysiwygMarkdownEditor extends StatelessWidget {
 }
 
 class _EditorToolbar extends StatelessWidget {
-  const _EditorToolbar({required this.editorState});
+  const _EditorToolbar({required this.editorState, this.onPaste});
   final EditorState editorState;
+  final VoidCallback? onPaste;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -216,6 +382,13 @@ class _EditorToolbar extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       children: [
+        IconButton(
+          tooltip: '粘贴图片 / Markdown / 富文本',
+          visualDensity: VisualDensity.compact,
+          iconSize: 19,
+          onPressed: onPaste,
+          icon: const Icon(Icons.content_paste),
+        ),
         _button(
           Icons.format_bold,
           '粗体',

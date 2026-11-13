@@ -214,17 +214,27 @@ class StorageLocation {
 /// directory so replacing a DEB package or a Windows portable bundle keeps the
 /// selected database path and other preferences.
 class AppPreferences {
+  static Map<String, String>? _sessionValues;
+  static void useSessionOnly() {
+    _sessionValues = {};
+  }
+
   static const databasePathKey = 'database_path';
   static const themePreferenceKey = 'theme_preference';
   static const fontScaleKey = 'font_scale';
   static const viewScaleKey = 'view_scale';
 
   static Future<String?> readString(String key) async {
+    if (_sessionValues != null) return _sessionValues![key];
     final preferences = await SharedPreferences.getInstance();
     return preferences.getString(key);
   }
 
   static Future<void> writeString(String key, String value) async {
+    if (_sessionValues != null) {
+      _sessionValues![key] = value;
+      return;
+    }
     final preferences = await SharedPreferences.getInstance();
     final saved = await preferences.setString(key, value);
     if (!saved) {

@@ -24,28 +24,7 @@ String prepareExtendedMarkdown(String source) {
     final encoded = base64Url.encode(utf8.encode(formula));
     return '\n$_mathSentinel$encoded\n';
   });
-  return _removeStructuralBlankLines(prepared);
-}
-
-String _removeStructuralBlankLines(String source) {
-  final lines = source.split('\n');
-  final compacted = <String>[];
-  var insideCodeFence = false;
-  for (final line in lines) {
-    final trimmed = line.trim();
-    if (trimmed.startsWith('```')) {
-      compacted.add(line);
-      final hasClosingFence = trimmed.indexOf('```', 3) >= 0;
-      if (!hasClosingFence) insideCodeFence = !insideCodeFence;
-      continue;
-    }
-    // Markdown uses blank lines as structural separators. The editor already
-    // represents each block separately, so keeping those lines creates large,
-    // editable empty paragraphs between every heading and paragraph.
-    if (!insideCodeFence && trimmed.isEmpty) continue;
-    compacted.add(line);
-  }
-  return compacted.join('\n');
+  return prepared;
 }
 
 String _normalizeCodeFences(String source) {
@@ -342,6 +321,11 @@ class ExtendedMarkdownBody extends StatelessWidget {
     data: data,
     selectable: selectable,
     softLineBreak: true,
+    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      p: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
+      blockSpacing: 12,
+      listIndent: 24,
+    ),
     blockSyntaxes: const [DisplayMathBlockSyntax()],
     inlineSyntaxes: [InlineMathSyntax()],
     builders: {

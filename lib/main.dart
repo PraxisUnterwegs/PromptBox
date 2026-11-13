@@ -8,7 +8,9 @@ import 'storage.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('zh_CN');
-  final path = await StorageLocation.resolve();
+  const demoRoot = String.fromEnvironment('PROMPTBOX_DEMO_ROOT');
+  if (demoRoot.isNotEmpty) AppPreferences.useSessionOnly();
+  final path = demoRoot.isEmpty ? await StorageLocation.resolve() : demoRoot;
   final controller = PromptBoxController(store: JsonPromptStore(path));
   await controller.initialize();
   runApp(PromptBoxApp(controller: controller));

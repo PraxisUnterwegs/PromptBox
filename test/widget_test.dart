@@ -357,11 +357,11 @@ void main() {
     expect(exported, contains(r'$$'));
   });
 
-  test('编辑器导入会移除结构性空行但保留代码块内部空行', () {
+  test('编辑器导入保留段落空行和代码块内部空行', () {
     final prepared = prepareExtendedMarkdown(
       '# 标题\n\n正文\n\n```dart\n第一行\n\n第三行\n```',
     );
-    expect(prepared, startsWith('# 标题\n正文\n```dart'));
+    expect(prepared, startsWith('# 标题\n\n正文\n\n```dart'));
     expect(prepared, contains('第一行\n\n第三行'));
   });
 

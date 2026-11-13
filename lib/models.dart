@@ -6,6 +6,35 @@ String dateKey(DateTime value) =>
 DateTime dateOnly(DateTime value) =>
     DateTime(value.year, value.month, value.day);
 
+class PromptImage {
+  const PromptImage({
+    required this.relativePath,
+    required this.width,
+    required this.height,
+    required this.byteLength,
+    required this.sha256,
+  });
+  final String relativePath;
+  final int width, height, byteLength;
+  final String sha256;
+
+  Map<String, Object?> toJson() => {
+    'path': relativePath,
+    'width': width,
+    'height': height,
+    'byteLength': byteLength,
+    'sha256': sha256,
+    'mimeType': 'image/png',
+  };
+  factory PromptImage.fromJson(Map<String, Object?> json) => PromptImage(
+    relativePath: json['path']! as String,
+    width: json['width']! as int,
+    height: json['height']! as int,
+    byteLength: json['byteLength']! as int,
+    sha256: json['sha256']! as String,
+  );
+}
+
 class PromptEntry {
   PromptEntry({
     required this.id,
@@ -15,7 +44,9 @@ class PromptEntry {
     List<String>? tagIds,
     this.outlineName,
     this.completed = false,
-  }) : tagIds = tagIds ?? <String>[];
+    List<PromptImage>? images,
+  }) : tagIds = tagIds ?? <String>[],
+       images = images ?? <PromptImage>[];
   final String id;
   String content;
   final DateTime createdAt;
@@ -23,13 +54,16 @@ class PromptEntry {
   final List<String> tagIds;
   String? outlineName;
   bool completed;
+  final List<PromptImage> images;
 
   String get title {
     final lines = content
         .split('\n')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty);
-    if (lines.isEmpty) return '无标题 Prompt';
+    if (lines.isEmpty) {
+      return images.isEmpty ? '无标题 Prompt' : '图片 · ${images.length} 张';
+    }
     final cleaned = lines.first.replaceFirst(RegExp(r'^#{1,6}\s*'), '');
     return cleaned.length > 48 ? '${cleaned.substring(0, 48)}…' : cleaned;
   }
@@ -44,6 +78,8 @@ class PromptEntry {
     'updatedAt': updatedAt.toIso8601String(),
     'tagIds': tagIds,
     'completed': completed,
+    if (images.isNotEmpty)
+      'images': images.map((image) => image.toJson()).toList(),
     if (outlineName?.trim().isNotEmpty == true)
       'outlineName': outlineName!.trim(),
   };
@@ -55,6 +91,12 @@ class PromptEntry {
     tagIds: (json['tagIds'] as List<Object?>? ?? const []).cast<String>(),
     outlineName: (json['outlineName'] as String?)?.trim(),
     completed: json['completed'] as bool? ?? false,
+    images:
+        (json['images'] as List<Object?>? ?? const [])
+            .map(
+              (e) => PromptImage.fromJson((e! as Map).cast<String, Object?>()),
+            )
+            .toList(),
   );
 }
 

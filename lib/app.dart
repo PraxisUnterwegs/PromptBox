@@ -17,6 +17,8 @@ import 'markdown_extensions.dart';
 import 'models.dart';
 import 'storage.dart';
 import 'wysiwyg_editor.dart';
+import 'image_storage.dart';
+import 'image_widgets.dart';
 
 bool shouldShowConversationOutline(DateTime? selectedDate, DateTime today) =>
     selectedDate != null &&
@@ -176,6 +178,14 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   Widget _conversation() => Column(
     children: [
       _toolbar(),
+      if (const String.fromEnvironment('PROMPTBOX_DEMO_ROOT').isNotEmpty)
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: Text(
+            '本地功能预览 · 使用独立演示数据库，不影响正式版数据或设置',
+            style: TextStyle(color: Colors.deepPurple),
+          ),
+        ),
       if (controller.tomorrowPlanSelected)
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
@@ -206,6 +216,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
                     return PromptBubble(
                       key: ValueKey('prompt-bubble-${entry.id}'),
                       entry: entry,
+                      databasePath: controller.databasePath,
                       tags: controller.tags,
                       collapsed: _collapsedIds.contains(entry.id),
                       onToggleCollapsed:
@@ -308,33 +319,35 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   );
 
   Widget _emptyState() => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.chat_bubble_outline,
-          size: 54,
-          color: Theme.of(context).colorScheme.outline,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          controller.query.isNotEmpty || controller.selectedTagId != null
-              ? '\u6ca1\u6709\u5339\u914d\u7ed3\u679c'
-              : controller.quickAccessSelected
-              ? '\u8fd8\u6ca1\u6709\u5feb\u901f\u8bbf\u95ee\u5185\u5bb9'
-              : controller.tomorrowPlanSelected
-              ? '把明天要做的事写在这里'
-              : '\u628a\u60f3\u5230\u7684 Prompt \u5199\u5728\u8fd9\u91cc',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          controller.quickAccessSelected
-              ? '\u5728\u6c14\u6ce1\u4e0a\u70b9\u51fb\u661f\u6807\u5373\u53ef\u6536\u85cf'
-              : '\u652f\u6301 Markdown\u3001\u6807\u7b7e\u4e0e\u5373\u65f6\u4fdd\u5b58',
-          style: TextStyle(color: Theme.of(context).colorScheme.outline),
-        ),
-      ],
+    child: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.chat_bubble_outline,
+            size: 54,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            controller.query.isNotEmpty || controller.selectedTagId != null
+                ? '\u6ca1\u6709\u5339\u914d\u7ed3\u679c'
+                : controller.quickAccessSelected
+                ? '\u8fd8\u6ca1\u6709\u5feb\u901f\u8bbf\u95ee\u5185\u5bb9'
+                : controller.tomorrowPlanSelected
+                ? '把明天要做的事写在这里'
+                : '\u628a\u60f3\u5230\u7684 Prompt \u5199\u5728\u8fd9\u91cc',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            controller.quickAccessSelected
+                ? '\u5728\u6c14\u6ce1\u4e0a\u70b9\u51fb\u661f\u6807\u5373\u53ef\u6536\u85cf'
+                : '\u652f\u6301 Markdown\u3001\u6807\u7b7e\u4e0e\u5373\u65f6\u4fdd\u5b58',
+            style: TextStyle(color: Theme.of(context).colorScheme.outline),
+          ),
+        ],
+      ),
     ),
   );
 
@@ -391,11 +404,16 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   Future<void> _send() async {
     if (_sending) return;
     final value = _composer.markdown;
-    if (value.trim().isEmpty) return;
+    if (_composer.isEmpty || _composer.pasting) return;
+    final images = List<PendingImage>.of(_composer.images);
     _sending = true;
     try {
-      await controller.addPrompt(value);
-      _composer.clear();
+      await controller.addPrompt(value, images: images);
+      if (_composer.markdown == value &&
+          _composer.images.length == images.length &&
+          _composer.images.every(images.contains)) {
+        _composer.clear();
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
             controller.quickAccessSelected ||
@@ -410,6 +428,12 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
           curve: Curves.easeOut,
         );
       });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('发送失败，草稿已保留：$error')));
+      }
     } finally {
       _sending = false;
     }
@@ -418,7 +442,12 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   Future<void> _openLongEditor() async {
     final value = await showDialog<String>(
       context: context,
-      builder: (_) => LongEditorDialog(initialValue: _composer.markdown),
+      builder:
+          (_) => LongEditorDialog(
+            initialValue: _composer.markdown,
+            initialImages: List.of(_composer.images),
+            onImagesSaved: _composer.replaceImages,
+          ),
     );
     if (value != null) _composer.setMarkdown(value);
   }
@@ -430,7 +459,7 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
           (_) =>
               LongEditorDialog(initialValue: entry.content, title: '编辑 Prompt'),
     );
-    if (value != null && value.trim().isNotEmpty) {
+    if (value != null && (value.trim().isNotEmpty || entry.images.isNotEmpty)) {
       await controller.editPrompt(entry, value);
     }
   }
@@ -705,6 +734,7 @@ class PromptBubble extends StatelessWidget {
     this.onToggleQuickAccess,
     this.showDate = false,
     this.onToggleCompleted,
+    this.databasePath,
     required this.onDelete,
     required this.onMoveUp,
     required this.onMoveDown,
@@ -712,6 +742,7 @@ class PromptBubble extends StatelessWidget {
     required this.onCreateTag,
   });
   final PromptEntry entry;
+  final String? databasePath;
   final List<TagDefinition> tags;
   final bool collapsed;
   final VoidCallback? onToggleCollapsed;
@@ -757,8 +788,17 @@ class PromptBubble extends StatelessWidget {
                     ),
                   ],
                 )
-              else
-                ExtendedMarkdownBody(data: entry.content, selectable: true),
+              else ...[
+                if (entry.content.isNotEmpty)
+                  ExtendedMarkdownBody(data: entry.content, selectable: true),
+                if (entry.images.isNotEmpty && databasePath != null) ...[
+                  if (entry.content.isNotEmpty) const SizedBox(height: 12),
+                  PromptImageGallery(
+                    images: entry.images,
+                    databasePath: databasePath!,
+                  ),
+                ],
+              ],
               if (!collapsed && entry.tagIds.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Wrap(
@@ -971,8 +1011,14 @@ class _ComposerState extends State<Composer> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (widget.controller.images.isNotEmpty)
+                PendingImageStrip(
+                  images: widget.controller.images,
+                  onRemove: widget.controller.removeImage,
+                ),
               Container(
-                height: 126,
+                height:
+                    58 + MediaQuery.textScalerOf(context).scale(15) * 1.4 * 5,
                 decoration: BoxDecoration(
                   border: Border.all(
                     color: Theme.of(context).colorScheme.outlineVariant,
@@ -1007,7 +1053,10 @@ class _ComposerState extends State<Composer> {
         const SizedBox(width: 8),
         IconButton.filled(
           tooltip: '发送',
-          onPressed: widget.controller.isEmpty ? null : widget.onSend,
+          onPressed:
+              widget.controller.isEmpty || widget.controller.pasting
+                  ? null
+                  : widget.onSend,
           icon: const Icon(Icons.send),
         ),
       ],
@@ -1020,9 +1069,13 @@ class LongEditorDialog extends StatefulWidget {
     super.key,
     required this.initialValue,
     this.title = '长编辑器',
+    this.initialImages = const [],
+    this.onImagesSaved,
   });
   final String initialValue;
   final String title;
+  final List<PendingImage> initialImages;
+  final ValueChanged<List<PendingImage>>? onImagesSaved;
   @override
   State<LongEditorDialog> createState() => _LongEditorDialogState();
 }
@@ -1033,6 +1086,12 @@ class _LongEditorDialogState extends State<LongEditorDialog> {
   void initState() {
     super.initState();
     _controller = WysiwygMarkdownController(widget.initialValue);
+    _controller.images.addAll(widget.initialImages);
+  }
+
+  void _finish() {
+    widget.onImagesSaved?.call(List.of(_controller.images));
+    Navigator.pop(context, _controller.markdown);
   }
 
   @override
@@ -1073,18 +1132,27 @@ class _LongEditorDialogState extends State<LongEditorDialog> {
                   },
                   icon: const Icon(Icons.refresh),
                 ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context, _controller.markdown),
-                  icon: const Icon(Icons.close),
-                ),
+                IconButton(onPressed: _finish, icon: const Icon(Icons.close)),
               ],
             ),
           ),
           const Divider(height: 1),
+          ListenableBuilder(
+            listenable: _controller,
+            builder:
+                (context, _) =>
+                    _controller.images.isEmpty
+                        ? const SizedBox.shrink()
+                        : PendingImageStrip(
+                          images: _controller.images,
+                          onRemove: _controller.removeImage,
+                        ),
+          ),
           Expanded(
             child: WysiwygMarkdownEditor(
               controller: _controller,
               autoFocus: true,
+              allowImages: widget.onImagesSaved != null,
             ),
           ),
           const Divider(height: 1),
@@ -1098,10 +1166,7 @@ class _LongEditorDialogState extends State<LongEditorDialog> {
                   child: const Text('取消'),
                 ),
                 const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, _controller.markdown),
-                  child: const Text('保存并回填'),
-                ),
+                FilledButton(onPressed: _finish, child: const Text('保存并回填')),
               ],
             ),
           ),

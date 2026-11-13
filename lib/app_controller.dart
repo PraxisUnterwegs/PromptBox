@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'storage.dart';
+import 'image_storage.dart';
 
 enum AppThemePreference { system, light, dark }
 
@@ -166,8 +167,11 @@ class PromptBoxController extends ChangeNotifier {
     }).toList();
   }
 
-  Future<void> addPrompt(String content) async {
-    if (content.trim().isEmpty) return;
+  Future<void> addPrompt(
+    String content, {
+    List<PendingImage> images = const [],
+  }) async {
+    if (content.trim().isEmpty && images.isEmpty) return;
     final isPlan = tomorrowPlanSelected;
     final target = isPlan ? tomorrow : today;
     if (selectedDate == null || dateKey(selectedDate!) != dateKey(target)) {
@@ -178,19 +182,39 @@ class PromptBoxController extends ChangeNotifier {
       }
     }
     final now = _clock();
-    currentDay!.entries.add(
-      PromptEntry(
-        id: '${now.microsecondsSinceEpoch}',
-        content: content.trimRight(),
-        createdAt: now,
-        updatedAt: now,
-      ),
+    final imageStore = PromptImageStorage(databasePath);
+    final storedImages = await imageStore.save(target, images);
+    final day = currentDay!;
+    final entry = PromptEntry(
+      id: '${now.microsecondsSinceEpoch}',
+      content: content.trimRight(),
+      createdAt: now,
+      updatedAt: now,
+      images: storedImages,
     );
-    await _persistDay();
+    day.entries.add(entry);
+    var committed = false;
+    try {
+      await _store.writeDay(day);
+      committed = true;
+      if (quickAccessReferences.isNotEmpty) await _loadQuickAccess();
+      availableDays = await _store.listDays();
+      error = null;
+    } catch (e) {
+      if (!committed) {
+        day.entries.remove(entry);
+        await imageStore.rollback(storedImages);
+        error = '保存失败：$e';
+        rethrow;
+      }
+      error = '内容已保存，列表刷新失败：$e';
+    } finally {
+      notifyListeners();
+    }
   }
 
   Future<void> editPrompt(PromptEntry entry, String content) async {
-    if (content.trim().isEmpty) return;
+    if (content.trim().isEmpty && entry.images.isEmpty) return;
     entry.content = content.trimRight();
     entry.updatedAt = _clock();
     await _persistEntry(entry);
