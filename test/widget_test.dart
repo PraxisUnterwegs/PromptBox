@@ -176,7 +176,9 @@ void main() {
     expect(sent, isTrue);
   });
 
-  testWidgets('输入框 Enter 换行，Ctrl+Enter 发送', (tester) async {
+  testWidgets('输入框 Enter 换行，Ctrl+Enter 发送，macOS 同时支持 Cmd+Enter', (
+    tester,
+  ) async {
     final text = WysiwygMarkdownController();
     var sent = 0;
     addTearDown(text.dispose);
@@ -217,6 +219,13 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(sent, 1);
+    if (Platform.isMacOS) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+      expect(sent, 2);
+    }
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpWidget(const SizedBox.shrink());
   });

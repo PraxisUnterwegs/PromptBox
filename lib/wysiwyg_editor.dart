@@ -320,7 +320,7 @@ class WysiwygMarkdownEditor extends StatelessWidget {
                         key: 'send prompt',
                         getDescription: () => '发送 Prompt',
                         command: 'ctrl+enter',
-                        macOSCommand: 'cmd+enter',
+                        macOSCommand: 'ctrl+enter,cmd+enter',
                         handler: (_) {
                           onSubmit!();
                           return KeyEventResult.handled;

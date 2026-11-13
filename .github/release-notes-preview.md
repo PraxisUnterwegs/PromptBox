@@ -1,4 +1,4 @@
-# PromptBox 0.1 Preview 8
+# PromptBox 0.1 Preview 9
 
 本次预览版主要用于功能体验、兼容性验证和收集反馈，尚不是正式稳定版。
 
@@ -9,7 +9,8 @@
 - 输入框默认约五行文字，适配字体与界面缩放。
 - 修复 Markdown 和富文本粘贴丢失加粗、斜体、列表、段落空行和换行的问题。
 - 修复 macOS 使用 Flutter 默认图标的问题，补全 PromptBox 各尺寸图标。
-- 版本 `0.1.0-preview.8+8`；保留手动检查、确认下载、确认安装的更新流程及个人设置。
+- macOS 同时支持原有 Ctrl+Enter 和 Cmd+Enter 发送，普通 Enter 继续换行。
+- 版本 `0.1.0-preview.9+9`；保留手动检查、确认下载、确认安装的更新流程及个人设置。
 
 ## Preview 7 update
 
