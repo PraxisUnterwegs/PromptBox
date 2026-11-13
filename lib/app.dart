@@ -19,14 +19,21 @@ import 'storage.dart';
 import 'wysiwyg_editor.dart';
 import 'image_storage.dart';
 import 'image_widgets.dart';
+import 'update_draft.dart';
 
 bool shouldShowConversationOutline(DateTime? selectedDate, DateTime today) =>
     selectedDate != null &&
     dateOnly(today).difference(dateOnly(selectedDate)).inDays >= 0;
 
 class PromptBoxApp extends StatelessWidget {
-  const PromptBoxApp({super.key, required this.controller});
+  const PromptBoxApp({
+    super.key,
+    required this.controller,
+    this.updaterFactory,
+  });
   final PromptBoxController controller;
+  final AppUpdateService Function(Future<void> Function() prepareForRestart)?
+  updaterFactory;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -55,7 +62,10 @@ class PromptBoxApp extends StatelessWidget {
                 viewScale: controller.viewScale,
                 child: child!,
               ),
-          home: PromptBoxHome(controller: controller),
+          home: PromptBoxHome(
+            controller: controller,
+            updaterFactory: updaterFactory,
+          ),
         ),
   );
 
@@ -81,8 +91,14 @@ class PromptBoxApp extends StatelessWidget {
 }
 
 class PromptBoxHome extends StatefulWidget {
-  const PromptBoxHome({super.key, required this.controller});
+  const PromptBoxHome({
+    super.key,
+    required this.controller,
+    this.updaterFactory,
+  });
   final PromptBoxController controller;
+  final AppUpdateService Function(Future<void> Function() prepareForRestart)?
+  updaterFactory;
   @override
   State<PromptBoxHome> createState() => _PromptBoxHomeState();
 }
@@ -91,7 +107,8 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
     with WidgetsBindingObserver {
   final _composer = WysiwygMarkdownController();
   final _search = TextEditingController();
-  final _updater = AppUpdateService();
+  late final AppUpdateService _updater;
+  final _updateDraft = UpdateDraftStore();
   final _itemScroll = ItemScrollController();
   final Set<String> _collapsedIds = {};
   bool _sending = false;
@@ -103,12 +120,54 @@ class _PromptBoxHomeState extends State<PromptBoxHome>
   @override
   void initState() {
     super.initState();
+    _updater =
+        widget.updaterFactory?.call(_saveUpdateDraft) ??
+        AppUpdateService(prepareForRestart: _saveUpdateDraft);
+    unawaited(_restoreUpdateDraft());
     WidgetsBinding.instance.addObserver(this);
     _rolloverTimer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => controller.checkDateRollover(),
     );
     _scheduleMidnightCheck();
+  }
+
+  Future<void> _saveUpdateDraft() async {
+    if (_sending || _composer.pasting) throw StateError('正在发送或粘贴，请完成后再安装更新');
+    await _updateDraft.save(
+      _composer.markdown,
+      List.of(_composer.images),
+      plannedDate: controller.tomorrowPlanSelected ? controller.tomorrow : null,
+    );
+  }
+
+  Future<void> _restoreUpdateDraft() async {
+    try {
+      final draft = await _updateDraft.read();
+      if (draft == null || !mounted || !_composer.isEmpty) return;
+      if (draft.plannedDate != null &&
+          dateKey(draft.plannedDate!) == dateKey(controller.tomorrow)) {
+        await controller.selectTomorrowPlan();
+      }
+      if (!mounted) return;
+      _composer.setMarkdown(draft.markdown);
+      _composer.replaceImages(draft.images);
+      await _updateDraft.consume();
+      if (mounted && !_composer.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已恢复升级前的文字和图片草稿')));
+      }
+    } on MissingPluginException {
+      // Widget tests do not initialize the desktop path provider.
+      return;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('升级前草稿尚未恢复，文件已保留：$error')));
+      }
+    }
   }
 
   void _scheduleMidnightCheck() {

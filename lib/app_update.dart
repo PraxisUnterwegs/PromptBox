@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'windows_update_installer.dart';
 
 class ReleaseVersion implements Comparable<ReleaseVersion> {
   ReleaseVersion(this.numbers, this.pre);
@@ -126,12 +128,25 @@ class AppUpdateService extends ChangeNotifier {
     HttpClient Function()? createClient,
     Future<String> Function()? loadVersion,
     Future<Directory> Function()? tempDirectory,
+    this.prepareForRestart,
+    Future<void> Function()? exitForRestart,
   }) : _createClient = createClient ?? HttpClient.new,
        _loadVersion = loadVersion ?? _readInstalledVersion,
-       _tempDirectory = tempDirectory ?? getTemporaryDirectory;
+       _tempDirectory = tempDirectory ?? getTemporaryDirectory,
+       _exitForRestart = exitForRestart ?? _exitApplication;
   final HttpClient Function() _createClient;
   final Future<String> Function() _loadVersion;
   final Future<Directory> Function() _tempDirectory;
+  final Future<void> Function()? prepareForRestart;
+  final Future<void> Function() _exitForRestart;
+
+  static Future<void> _exitApplication() async {
+    final response = await ServicesBinding.instance.exitApplication(
+      AppExitType.required,
+    );
+    if (response != AppExitResponse.exit) throw StateError('应用未能退出，更新已取消，请重试');
+  }
+
   bool busy = false;
   bool installationPending = false;
   String status = '尚未检查更新';
@@ -338,8 +353,15 @@ class AppUpdateService extends ChangeNotifier {
       status = '安装成功；请保存编辑内容，关闭并重新打开 PromptBox';
     } else {
       final windows = Platform.isWindows;
+      final target =
+          windows ? p.dirname(Platform.resolvedExecutable) : _macBundle();
+      final database = p.normalize(p.absolute(databasePath));
+      if (p.equals(database, target) || p.isWithin(target, database)) {
+        throw StateError('数据库位于程序安装目录中，请先在设置中迁移到独立目录再更新');
+      }
+      final work = await _staging!.createTemp('install-');
       final name = windows ? 'install_windows.ps1' : 'install_macos.sh';
-      final script = File(p.join(_staging!.path, name));
+      final script = File(p.join(work.path, name));
       final source = await rootBundle.loadString('packaging/updater/$name');
       await script.writeAsBytes([
         if (windows) ...[0xef, 0xbb, 0xbf],
@@ -356,13 +378,32 @@ class AppUpdateService extends ChangeNotifier {
                 'powershell.exe',
               )
               : '/bin/sh';
-      final target =
-          windows ? p.dirname(Platform.resolvedExecutable) : _macBundle();
-      final database = p.normalize(p.absolute(databasePath));
-      if (p.equals(database, target) || p.isWithin(target, database)) {
-        throw StateError('数据库位于程序安装目录中，请先在设置中迁移到独立目录再更新');
+      if (windows) {
+        status = '正在验证安装包并准备更新助手…';
+        _changed();
+        final session = await WindowsUpdateInstaller.prepare(
+          executable: executable,
+          script: script.path,
+          archive: file.path,
+          target: target,
+          work: work,
+          applicationPid: pid,
+          digest: update.digest,
+        );
+        try {
+          await prepareForRestart?.call();
+          await session.apply();
+          installationPending = true;
+          status = '更新助手已就绪，草稿已保存，正在退出并安装…';
+          _changed();
+          await _exitForRestart();
+        } catch (_) {
+          installationPending = false;
+          await session.cancel();
+          rethrow;
+        }
+        return;
       }
-      // The helper waits for a normal exit. We never kill the app or discard drafts.
       final arguments =
           windows
               ? [
@@ -381,12 +422,12 @@ class AppUpdateService extends ChangeNotifier {
         '$pid',
         file.path,
         target,
-        _staging!.path,
+        work.path,
       ], mode: ProcessStartMode.detached);
       installationPending = true;
       downloaded = null;
       status =
-          '安装已授权。请保存编辑内容并关闭 PromptBox；退出后替换并重启。失败详情见 ${p.join(_staging!.path, 'install.log')}';
+          '安装已授权。请保存编辑内容并关闭 PromptBox；退出后替换并重启。失败详情见 ${p.join(work.path, 'install.log')}';
     }
   });
 

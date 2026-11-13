@@ -101,7 +101,9 @@ class UpdateSettings extends StatelessWidget {
                         ? null
                         : () async {
                           final detail =
-                              Platform.isLinux
+                              Platform.isWindows
+                                  ? '确认后将自动保存聊天输入框中的文字和图片草稿。更新助手验证就绪后，应用会自动退出、替换旧版本并重新启动，随后恢复草稿。'
+                                  : Platform.isLinux
                                   ? '系统将请求管理员授权，用 DEB 包替换已安装的版本。完成后请保存编辑内容并重新打开软件。'
                                   : '授权后，请先保存编辑内容，再自行关闭 PromptBox。安装程序会等待正常退出，然后备份旧程序、替换并重新启动。请勿同时启动其他 PromptBox 实例。';
                           if (await _confirm(

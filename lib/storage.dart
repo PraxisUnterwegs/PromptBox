@@ -215,8 +215,19 @@ class StorageLocation {
 /// selected database path and other preferences.
 class AppPreferences {
   static Map<String, String>? _sessionValues;
+  static File? _sessionFile;
   static void useSessionOnly() {
     _sessionValues = {};
+    _sessionFile = null;
+  }
+
+  /// An isolated persistence backend for native integration runs.
+  static Future<void> useIsolatedFile(File file) async {
+    _sessionFile = file;
+    _sessionValues =
+        (await JsonPromptStore(
+          file.parent.path,
+        )._readObject(file.path)).cast<String, String>();
   }
 
   static const databasePathKey = 'database_path';
@@ -233,6 +244,12 @@ class AppPreferences {
   static Future<void> writeString(String key, String value) async {
     if (_sessionValues != null) {
       _sessionValues![key] = value;
+      final file = _sessionFile;
+      if (file != null) {
+        await JsonPromptStore(
+          file.parent.path,
+        )._writeObject(file.path, _sessionValues!);
+      }
       return;
     }
     final preferences = await SharedPreferences.getInstance();
